@@ -3,11 +3,13 @@ import os
 import uuid
 import json
 import datetime
+import time
+import hashlib
 from datetime import timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from io import BytesIO
 import threading
-import time
+from functools import wraps
 from supabase import create_client, Client
 
 app = Flask(__name__)
@@ -18,7 +20,52 @@ SUPABASE_URL = "https://gehboaskzdhotdyzzjae.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlaGJvYXNremRob3RkeXp6amFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYxNzMyMTYsImV4cCI6MjA3MTc0OTIxNn0.r0Z2f3xxnM9fv_oQDmOZV5rQCmaBm7OC885WQupmQ4o"
 BUCKET_NAME = "my-bucket"
 
+# قائمة الامتدادات المسموحة
+ALLOWED_EXTENSIONS = {
+    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',  # صور
+    'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv',  # فيديو
+    'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',  # صوت
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',  # مستندات
+    'txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml',  # نصوص
+    'zip', 'rar', '7z', 'tar', 'gz'  # أرشيف
+}
+
+# قاعدة بيانات مؤقتة (في بيئة حقيقية استخدم قاعدة بيانات حقيقية)
+projects_db = {}
+files_db = {}
+
+# ديكورات المساعدة
+def retry_on_failure(max_retries=3, delay=1):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    time.sleep(delay * (attempt + 1))
+            return None
+        return wrapper
+    return decorator
+
+# وظائف مساعدة
+def safe_filename(filename, project_id):
+    """إنشاء اسم ملف آمن مع تجنب التكرار"""
+    timestamp = str(int(time.time()))
+    file_hash = hashlib.md5(f"{project_id}_{filename}_{timestamp}".encode()).hexdigest()[:8]
+    name, ext = os.path.splitext(filename)
+    safe_name = f"{file_hash}_{name[:50]}{ext}"  # تقليل طول الاسم لتجنب مشاكل المسار
+    return safe_name
+
+def allowed_file(filename):
+    """التحقق من أن امتداد الملف مسموح"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 # تهيئة Supabase Client
+@retry_on_failure(max_retries=3, delay=1)
 def get_supabase_client():
     """تحسين تهيئة عميل Supabase مع معالجة شاملة للأخطاء"""
     try:
@@ -80,11 +127,7 @@ def get_supabase_client():
         print(f"Unexpected error initializing Supabase client: {e}")
         return None
 
-# قاعدة بيانات مؤقتة (في بيئة حقيقية استخدم قاعدة بيانات حقيقية)
-projects_db = {}
-files_db = {}
-
-# وظائف مساعدة لإدارة المشاريع والملفات مع Supabase
+@retry_on_failure(max_retries=3, delay=1)
 def upload_file_to_supabase(supabase, file_data, file_name, project_id):
     """رفع ملف إلى Supabase Storage مع معالجة محسنة للأخطاء"""
     try:
@@ -158,17 +201,24 @@ def get_content_type(filename):
         'gif': 'image/gif',
         'bmp': 'image/bmp',
         'webp': 'image/webp',
+        'svg': 'image/svg+xml',
         
         # فيديو
         'mp4': 'video/mp4',
         'avi': 'video/x-msvideo',
         'mov': 'video/quicktime',
         'wmv': 'video/x-ms-wmv',
+        'flv': 'video/x-flv',
+        'webm': 'video/webm',
+        'mkv': 'video/x-matroska',
         
         # صوت
         'mp3': 'audio/mpeg',
         'wav': 'audio/wav',
         'ogg': 'audio/ogg',
+        'flac': 'audio/flac',
+        'aac': 'audio/aac',
+        'm4a': 'audio/mp4',
         
         # مستندات
         'pdf': 'application/pdf',
@@ -176,16 +226,25 @@ def get_content_type(filename):
         'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'xls': 'application/vnd.ms-excel',
         'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'ppt': 'application/vnd.ms-powerpoint',
+        'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         
         # نصوص
         'txt': 'text/plain',
+        'rtf': 'application/rtf',
+        'md': 'text/markdown',
         'html': 'text/html',
         'css': 'text/css',
         'js': 'application/javascript',
+        'json': 'application/json',
+        'xml': 'application/xml',
         
         # أرشيف
         'zip': 'application/zip',
         'rar': 'application/x-rar-compressed',
+        '7z': 'application/x-7z-compressed',
+        'tar': 'application/x-tar',
+        'gz': 'application/gzip',
     }
     
     return content_types.get(ext, 'application/octet-stream')
@@ -195,6 +254,7 @@ def get_file_url(project_id, file_name):
     file_path = f"{project_id}/{file_name}"
     return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_path}"
 
+@retry_on_failure(max_retries=3, delay=1)
 def download_file_from_supabase(supabase, project_id, file_name):
     """تحميل ملف من Supabase Storage"""
     try:
@@ -205,6 +265,7 @@ def download_file_from_supabase(supabase, project_id, file_name):
         print(f"Error downloading file from Supabase: {e}")
         return None
 
+@retry_on_failure(max_retries=3, delay=1)
 def delete_project_files(supabase, project_id):
     """حذف جميع ملفات المشروع من Supabase مع معالجة محسنة للأخطاء"""
     try:
@@ -305,32 +366,41 @@ def upload_project():
         max_file_size = 50 * 1024 * 1024  # 50 MB حد أقصى لكل ملف
         max_total_size = 200 * 1024 * 1024  # 200 MB حد أقصى للمشروع كاملاً
         
+        # طريقة أفضل لجمع الملفات
         for key in request.files:
-            file = request.files[key]
-            if file and file.filename and file.filename.strip():
-                # التحقق من حجم الملف
-                file.seek(0, 2)  # الانتقال إلى نهاية الملف
-                file_size = file.tell()
-                file.seek(0)  # العودة إلى البداية
-                
-                if file_size == 0:
-                    print(f"Warning: Empty file skipped - {file.filename}")
-                    continue
-                
-                if file_size > max_file_size:
-                    return jsonify({
-                        'success': False, 
-                        'message': f'الملف {file.filename} كبير جداً (الحد الأقصى 50 MB)'
+            files_list = request.files.getlist(key)
+            for file in files_list:
+                if file and file.filename and file.filename.strip():
+                    filename = file.filename.strip()
+                    
+                    # التحقق من الامتداد
+                    if not allowed_file(filename):
+                        print(f"Warning: Unsupported file extension - {filename}")
+                        continue
+                    
+                    # التحقق من حجم الملف
+                    file.seek(0, 2)
+                    file_size = file.tell()
+                    file.seek(0)
+                    
+                    if file_size == 0:
+                        print(f"Warning: Empty file skipped - {filename}")
+                        continue
+                    
+                    if file_size > max_file_size:
+                        return jsonify({
+                            'success': False, 
+                            'message': f'الملف {filename} كبير جداً (الحد الأقصى 50 MB)'
+                        })
+                    
+                    total_size += file_size
+                    uploaded_files.append({
+                        'file': file,
+                        'filename': filename,
+                        'size': file_size
                     })
-                
-                total_size += file_size
-                uploaded_files.append({
-                    'file': file,
-                    'filename': file.filename.strip(),
-                    'size': file_size
-                })
-                
-                print(f"Added file: {file.filename} ({file_size} bytes)")
+                    
+                    print(f"Added file: {filename} ({file_size} bytes)")
         
         if not uploaded_files:
             print("Error: No valid files found")
@@ -364,24 +434,44 @@ def upload_project():
             filename = file_data['filename']
             
             try:
-                # قراءة محتوى الملف
-                file.seek(0)  # التأكد من أن المؤشر في البداية
-                file_content = file.read()
+                # إنشاء اسم ملف آمن
+                safe_name = safe_filename(filename, project_id)
+                
+                # قراءة الملف بشكل أكثر كفاءة
+                file.seek(0)
+                
+                # للملفات الكبيرة، يمكن قراءتها على دفعات
+                if file_data['size'] > 10 * 1024 * 1024:  # 10 MB
+                    # قراءة الملف على دفعات للملفات الكبيرة
+                    file_content = bytearray()
+                    chunk_size = 1024 * 1024  # 1 MB chunks
+                    while True:
+                        chunk = file.read(chunk_size)
+                        if not chunk:
+                            break
+                        file_content.extend(chunk)
+                    file_content = bytes(file_content)
+                else:
+                    # قراءة مباشرة للملفات الصغيرة
+                    file_content = file.read()
                 
                 if not file_content:
                     failed_files.append(f"{filename} (محتوى فارغ)")
                     print(f"Failed: {filename} - empty content")
                     continue
                 
-                print(f"Uploading {filename} ({len(file_content)} bytes)...")
+                print(f"Uploading {filename} as {safe_name} ({len(file_content)} bytes)...")
                 
                 # رفع الملف
-                success = upload_file_to_supabase(supabase, file_content, filename, project_id)
+                success = upload_file_to_supabase(supabase, file_content, safe_name, project_id)
                 
                 if success:
-                    file_urls[filename] = get_file_url(project_id, filename)
+                    file_urls[filename] = {
+                        'url': get_file_url(project_id, safe_name),
+                        'safe_name': safe_name
+                    }
                     successful_uploads += 1
-                    print(f"Successfully uploaded: {filename}")
+                    print(f"Successfully uploaded: {filename} as {safe_name}")
                 else:
                     failed_files.append(filename)
                     print(f"Failed to upload: {filename}")
@@ -451,11 +541,17 @@ def api_get_project(project_id):
         return jsonify({'success': False, 'message': 'المشروع غير موجود'})
     
     project = projects_db[project_id]
+    
+    # تحضير روابط الملفات للعرض
+    display_file_urls = {}
+    for filename, file_info in project['file_urls'].items():
+        display_file_urls[filename] = file_info['url']
+    
     return jsonify({
         'success': True, 
         'project': {
             'name': project['name'],
-            'file_urls': project['file_urls'],
+            'file_urls': display_file_urls,
             'created_at': project['created_at'].isoformat() + 'Z'  # إضافة Z للإشارة إلى UTC
         }
     })
@@ -496,7 +592,8 @@ def view_project(project_id):
     
     # إنشاء قائمة الملفات
     files_list = ""
-    for filename, file_url in project['file_urls'].items():
+    for filename, file_info in project['file_urls'].items():
+        file_url = file_info['url']
         file_icon = get_file_icon_by_filename(filename)
         
         files_list += f"""
@@ -535,11 +632,11 @@ def view_project(project_id):
 def get_file_icon_by_filename(filename):
     ext = filename.split('.').pop().lower()
     
-    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
+    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']:
         return 'fas fa-file-image'
-    elif ext in ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm']:
+    elif ext in ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv']:
         return 'fas fa-file-video'
-    elif ext in ['mp3', 'wav', 'ogg', 'flac', 'aac']:
+    elif ext in ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']:
         return 'fas fa-file-audio'
     elif ext == 'pdf':
         return 'fas fa-file-pdf'
@@ -551,7 +648,7 @@ def get_file_icon_by_filename(filename):
         return 'fas fa-file-powerpoint'
     elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
         return 'fas fa-file-archive'
-    elif ext in ['txt', 'rtf', 'md']:
+    elif ext in ['txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml']:
         return 'fas fa-file-alt'
     else:
         return 'fas fa-file'
@@ -567,7 +664,8 @@ def download_file(project_id, filename):
     
     try:
         supabase = get_supabase_client()
-        file_content = download_file_from_supabase(supabase, project_id, filename)
+        safe_name = project['file_urls'][filename]['safe_name']
+        file_content = download_file_from_supabase(supabase, project_id, safe_name)
         
         if file_content:
             return send_file(
@@ -577,11 +675,11 @@ def download_file(project_id, filename):
             )
         else:
             # إذا فشل التحميل المباشر، إعادة التوجيه إلى رابط Supabase
-            return redirect(project['file_urls'][filename])
+            return redirect(project['file_urls'][filename]['url'])
     except Exception as e:
         print(f"Error downloading file: {e}")
         # إذا فشل التحميل، إعادة التوجيه إلى رابط Supabase
-        return redirect(project['file_urls'][filename])
+        return redirect(project['file_urls'][filename]['url'])
 
 # إضافة route للتحقق من حالة Supabase
 @app.route('/api/supabase/status')
@@ -1761,7 +1859,7 @@ HTML_TEMPLATE = """
                         العودة للرئيسية
                     </button>
                 </div>
-            </section>
+    </section>
         </main>
 
         <!-- الفوتر -->
@@ -1775,6 +1873,7 @@ HTML_TEMPLATE = """
         let selectedFiles = [];
         let countdownTimer;
         let lastMouse = { x: 0, y: 0 };
+        let uploadAbortController = null;
 
         // عند تحميل الصفحة
         document.addEventListener('DOMContentLoaded', function() {
@@ -1972,6 +2071,16 @@ HTML_TEMPLATE = """
             addFilesToList(files);
         }
 
+        // قائمة الامتدادات المسموحة (متطابقة مع الباك-إند)
+        const allowedExtensions = [
+            'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',  // صور
+            'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv',  // فيديو
+            'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',  // صوت
+            'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',  // مستندات
+            'txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml',  // نصوص
+            'zip', 'rar', '7z', 'tar', 'gz'  // أرشيف
+        ];
+
         // إضافة الملفات إلى القائمة
         function addFilesToList(files) {
             const maxFiles = 50; // حد أقصى لعدد الملفات
@@ -1983,8 +2092,16 @@ HTML_TEMPLATE = """
             
             let addedCount = 0;
             let skippedCount = 0;
+            let unsupportedFiles = [];
             
             files.forEach(file => {
+                // التحقق من الامتداد
+                const fileExt = file.name.toLowerCase().split('.').pop();
+                if (!allowedExtensions.includes(fileExt)) {
+                    unsupportedFiles.push(file.name);
+                    return;
+                }
+                
                 // التحقق من عدم وجود نفس الملف
                 const existingFile = selectedFiles.find(f => 
                     f.name === file.name && 
@@ -2001,6 +2118,11 @@ HTML_TEMPLATE = """
                     console.log(`Skipped duplicate file: ${file.name}`);
                 }
             });
+            
+            // عرض التحذيرات
+            if (unsupportedFiles.length > 0) {
+                alert(`ملفات غير مدعومة تم تجاهلها: ${unsupportedFiles.join(', ')}`);
+            }
             
             if (skippedCount > 0) {
                 alert(`تم تجاهل ${skippedCount} ملف مكرر`);
@@ -2077,15 +2199,15 @@ HTML_TEMPLATE = """
             // Fallback: استخدام امتداد الملف
             const ext = fileName.split('.').pop().toLowerCase();
             
-            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return 'fas fa-file-image';
-            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'].includes(ext)) return 'fas fa-file-video';
-            if (['mp3', 'wav', 'ogg', 'flac', 'aac'].includes(ext)) return 'fas fa-file-audio';
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) return 'fas fa-file-image';
+            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'].includes(ext)) return 'fas fa-file-video';
+            if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) return 'fas fa-file-audio';
             if (ext === 'pdf') return 'fas fa-file-pdf';
             if (['doc', 'docx'].includes(ext)) return 'fas fa-file-word';
             if (['xls', 'xlsx'].includes(ext)) return 'fas fa-file-excel';
             if (['ppt', 'pptx'].includes(ext)) return 'fas fa-file-powerpoint';
             if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'fas fa-file-archive';
-            if (['txt', 'rtf', 'md'].includes(ext)) return 'fas fa-file-alt';
+            if (['txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml'].includes(ext)) return 'fas fa-file-alt';
             
             return 'fas fa-file';
         }
@@ -2107,7 +2229,7 @@ HTML_TEMPLATE = """
             displayFilesList();
         }
 
-        // إرسال المشروع
+        // إرسال المشروع (النسخة المحسنة)
         function submitProject() {
             const projectName = document.getElementById('projectName').value.trim();
             
@@ -2127,7 +2249,24 @@ HTML_TEMPLATE = """
             const maxTotalSize = 200 * 1024 * 1024; // 200 MB
             let totalSize = 0;
             
+            // قائمة الامتدادات المسموحة (متطابقة مع الباك-إند)
+            const allowedExtensions = [
+                'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',  // صور
+                'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv',  // فيديو
+                'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',  // صوت
+                'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',  // مستندات
+                'txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml',  // نصوص
+                'zip', 'rar', '7z', 'tar', 'gz'  // أرشيف
+            ];
+            
             for (let file of selectedFiles) {
+                // التحقق من الامتداد
+                const fileExt = file.name.toLowerCase().split('.').pop();
+                if (!allowedExtensions.includes(fileExt)) {
+                    alert(`نوع الملف غير مدعوم: ${file.name}`);
+                    return;
+                }
+                
                 if (file.size > maxFileSize) {
                     alert(`الملف ${file.name} كبير جداً (الحد الأقصى 50 MB)`);
                     return;
@@ -2147,30 +2286,43 @@ HTML_TEMPLATE = """
             // بدء عملية الرفع
             showLoadingAnimation();
             
-            // إنشاء FormData وإضافة البيانات
+            // إنشاء FormData بطريقة صحيحة
             const formData = new FormData();
             formData.append('projectName', projectName);
             
-            // إضافة الملفات مع فهرسة صحيحة
+            // إضافة الملفات بطريقة صحيحة - استخدام نفس المفتاح لجميع الملفات
             selectedFiles.forEach((file, index) => {
                 console.log(`Adding file ${index}: ${file.name} (${file.size} bytes, ${file.type})`);
-                formData.append(`file_${index}`, file, file.name);
+                // استخدام نفس المفتاح 'files' لجميع الملفات
+                formData.append('files', file, file.name);
             });
             
-            // إعدادات الطلب
+            // إعدادات الطلب مع timeout محسن
+            uploadAbortController = new AbortController();
+            const signal = uploadAbortController.signal;
+            
             const requestOptions = {
                 method: 'POST',
                 body: formData,
-                // عدم تعيين Content-Type header يدوياً - سيتم تعيينه تلقائياً مع boundary
+                signal: signal
             };
             
-            // إرسال الطلب
+            // إرسال الطلب مع معالجة أفضل للأخطاء
             fetch('/upload', requestOptions)
                 .then(response => {
                     console.log(`Response status: ${response.status}`);
                     
+                    // معالجة أخطاء HTTP مختلفة
                     if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        if (response.status === 413) {
+                            throw new Error('حجم الملفات كبير جداً');
+                        } else if (response.status === 500) {
+                            throw new Error('خطأ في الخادم');
+                        } else if (response.status === 400) {
+                            throw new Error('بيانات غير صحيحة');
+                        } else {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
                     }
                     
                     return response.json();
@@ -2198,14 +2350,16 @@ HTML_TEMPLATE = """
                     
                     let errorMessage = 'حدث خطأ أثناء رفع المشروع.';
                     
-                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                        errorMessage += ' تحقق من الاتصال بالإنترنت.';
-                    } else if (error.message.includes('413')) {
-                        errorMessage = 'الملفات كبيرة جداً. يرجى تقليل الحجم.';
-                    } else if (error.message.includes('500')) {
-                        errorMessage += ' خطأ في الخادم. حاول مرة أخرى.';
+                    if (error.name === 'AbortError') {
+                        errorMessage = 'تم إلغاء عملية الرفع.';
+                    } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        errorMessage = 'مشكلة في الاتصال. تحقق من الإنترنت.';
+                    } else if (error.message.includes('كبير جداً')) {
+                        errorMessage = error.message;
+                    } else if (error.message.includes('خادم')) {
+                        errorMessage = 'خطأ في الخادم. حاول مرة أخرى لاحقاً.';
                     } else {
-                        errorMessage += ` التفاصيل: ${error.message}`;
+                        errorMessage = `${errorMessage} التفاصيل: ${error.message}`;
                     }
                     
                     alert(errorMessage);
@@ -2219,6 +2373,7 @@ HTML_TEMPLATE = """
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الرفع...';
                 submitBtn.disabled = true;
                 submitBtn.style.opacity = '0.7';
+                submitBtn.style.cursor = 'not-allowed';
             }
             
             // منع إغلاق النموذج أثناء الرفع
@@ -2226,7 +2381,11 @@ HTML_TEMPLATE = """
             if (cancelBtn) {
                 cancelBtn.disabled = true;
                 cancelBtn.style.opacity = '0.5';
+                cancelBtn.style.cursor = 'not-allowed';
             }
+            
+            // منع المستخدم من إغلاق الصفحة أثناء الرفع
+            window.addEventListener('beforeunload', preventClose);
         }
 
         // إخفاء رسوم متحركة للتحميل
@@ -2236,13 +2395,25 @@ HTML_TEMPLATE = """
                 submitBtn.innerHTML = 'ارفع المشروع';
                 submitBtn.disabled = false;
                 submitBtn.style.opacity = '1';
+                submitBtn.style.cursor = 'pointer';
             }
             
             const cancelBtn = document.getElementById('cancelBtn');
             if (cancelBtn) {
                 cancelBtn.disabled = false;
                 cancelBtn.style.opacity = '1';
+                cancelBtn.style.cursor = 'pointer';
             }
+            
+            // إزالة منع إغلاق الصفحة
+            window.removeEventListener('beforeunload', preventClose);
+        }
+
+        // دالة منع إغلاق الصفحة أثناء الرفع
+        function preventClose(e) {
+            e.preventDefault();
+            e.returnValue = 'عملية رفع الملفات جارية. هل تريد المغادرة؟';
+            return 'عملية رفع الملفات جارية. هل تريد المغادرة؟';
         }
 
         // عرض ملفات المشروع
@@ -2299,15 +2470,15 @@ HTML_TEMPLATE = """
         function getFileIconByFilename(filename) {
             const ext = filename.split('.').pop().toLowerCase();
             
-            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return 'fas fa-file-image';
-            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'].includes(ext)) return 'fas fa-file-video';
-            if (['mp3', 'wav', 'ogg', 'flac', 'aac'].includes(ext)) return 'fas fa-file-audio';
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) return 'fas fa-file-image';
+            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'].includes(ext)) return 'fas fa-file-video';
+            if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) return 'fas fa-file-audio';
             if (ext === 'pdf') return 'fas fa-file-pdf';
             if (['doc', 'docx'].includes(ext)) return 'fas fa-file-word';
             if (['xls', 'xlsx'].includes(ext)) return 'fas fa-file-excel';
             if (['ppt', 'pptx'].includes(ext)) return 'fas fa-file-powerpoint';
             if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'fas fa-file-archive';
-            if (['txt', 'rtf', 'md'].includes(ext)) return 'fas fa-file-alt';
+            if (['txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml'].includes(ext)) return 'fas fa-file-alt';
             
             return 'fas fa-file';
         }
@@ -2405,6 +2576,12 @@ HTML_TEMPLATE = """
             
             if (countdownTimer) {
                 clearInterval(countdownTimer);
+            }
+            
+            // إلغاء أي طلب جاري
+            if (uploadAbortController) {
+                uploadAbortController.abort();
+                uploadAbortController = null;
             }
         }
 
