@@ -20,18 +20,662 @@ BUCKET_NAME = "my-bucket"
 
 # تهيئة Supabase Client
 def get_supabase_client():
+    """تحسين تهيئة عميل Supabase مع معالجة شاملة للأخطاء"""
     try:
+        # التحقق من وجود المتغيرات المطلوبة
+        if not SUPABASE_URL:
+            print("Error: SUPABASE_URL is not defined or empty")
+            return None
+            
+        if not SUPABASE_KEY:
+            print("Error: SUPABASE_KEY is not defined or empty")
+            return None
+            
+        print(f"Initializing Supabase client for URL: {SUPABASE_URL}")
+        
+        # إنشاء العميل
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        return supabase
+        
+        # اختبار الاتصال بشكل أساسي
+        try:
+            # محاولة الوصول إلى قائمة buckets للتأكد من صحة الاتصال
+            buckets_response = supabase.storage.list_buckets()
+            print(f"Successfully connected to Supabase. Found {len(buckets_response)} buckets.")
+            
+            # التحقق من وجود bucket المطلوب
+            bucket_exists = any(bucket.name == BUCKET_NAME for bucket in buckets_response)
+            
+            if not bucket_exists:
+                print(f"Warning: Bucket '{BUCKET_NAME}' does not exist. Attempting to create...")
+                try:
+                    # محاولة إنشاء bucket جديد
+                    create_result = supabase.storage.create_bucket(
+                        BUCKET_NAME, 
+                        {"public": True, "allowedMimeTypes": None, "fileSizeLimit": None}
+                    )
+                    print(f"Successfully created bucket: {BUCKET_NAME}")
+                except Exception as bucket_error:
+                    print(f"Failed to create bucket: {bucket_error}")
+                    # يمكن المتابعة حتى لو فشل إنشاء bucket، قد يكون موجود بالفعل
+            else:
+                print(f"Bucket '{BUCKET_NAME}' exists and is accessible")
+                
+            return supabase
+            
+        except Exception as connection_error:
+            print(f"Error testing Supabase connection: {connection_error}")
+            # تحقق إذا كان الخطأ متعلق بالصلاحيات أم بالاتصال
+            error_str = str(connection_error).lower()
+            if "unauthorized" in error_str or "forbidden" in error_str:
+                print("Error: Check your Supabase API key permissions")
+            elif "not found" in error_str:
+                print("Error: Check your Supabase URL")
+            return None
+            
+    except ImportError as import_error:
+        print(f"Error importing Supabase library: {import_error}")
+        print("Make sure to install supabase: pip install supabase")
+        return None
     except Exception as e:
-        print(f"Error initializing Supabase client: {e}")
+        print(f"Unexpected error initializing Supabase client: {e}")
         return None
 
 # قاعدة بيانات مؤقتة (في بيئة حقيقية استخدم قاعدة بيانات حقيقية)
 projects_db = {}
 files_db = {}
 
-# HTML template (نفس محتوى index.html مع تعديلات طفيفة)
+# وظائف مساعدة لإدارة المشاريع والملفات مع Supabase
+def upload_file_to_supabase(supabase, file_data, file_name, project_id):
+    """رفع ملف إلى Supabase Storage مع معالجة محسنة للأخطاء"""
+    try:
+        # التحقق من وجود Bucket
+        try:
+            buckets = supabase.storage.list_buckets()
+            bucket_exists = any(bucket.name == BUCKET_NAME for bucket in buckets)
+            
+            if not bucket_exists:
+                # إنشاء Bucket إذا لم يكن موجوداً
+                try:
+                    supabase.storage.create_bucket(BUCKET_NAME, {"public": True})
+                    print(f"Created bucket: {BUCKET_NAME}")
+                except Exception as bucket_error:
+                    print(f"Error creating bucket: {bucket_error}")
+                    return False
+        except Exception as bucket_check_error:
+            print(f"Error checking buckets: {bucket_check_error}")
+            return False
+        
+        # إنشاء مسار الملف
+        file_path = f"{project_id}/{file_name}"
+        
+        # تحديد نوع المحتوى بناءً على امتداد الملف
+        content_type = get_content_type(file_name)
+        
+        # رفع الملف
+        try:
+            res = supabase.storage.from_(BUCKET_NAME).upload(
+                file_path, 
+                file_data, 
+                {"content-type": content_type, "upsert": "true"}
+            )
+            
+            # التحقق من نجاح العملية
+            if hasattr(res, 'error') and res.error:
+                print(f"Supabase upload error: {res.error}")
+                return False
+                
+            print(f"Successfully uploaded: {file_name}")
+            return True
+            
+        except Exception as upload_error:
+            print(f"Error during file upload: {upload_error}")
+            # محاولة حذف الملف إذا كان موجوداً ثم إعادة الرفع
+            try:
+                supabase.storage.from_(BUCKET_NAME).remove([file_path])
+                res = supabase.storage.from_(BUCKET_NAME).upload(
+                    file_path, 
+                    file_data, 
+                    {"content-type": content_type}
+                )
+                print(f"Successfully uploaded on second attempt: {file_name}")
+                return True
+            except:
+                return False
+                
+    except Exception as e:
+        print(f"Error uploading file to Supabase: {e}")
+        return False
+
+def get_content_type(filename):
+    """تحديد نوع المحتوى بناءً على امتداد الملف"""
+    ext = filename.lower().split('.')[-1]
+    
+    content_types = {
+        # صور
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'bmp': 'image/bmp',
+        'webp': 'image/webp',
+        
+        # فيديو
+        'mp4': 'video/mp4',
+        'avi': 'video/x-msvideo',
+        'mov': 'video/quicktime',
+        'wmv': 'video/x-ms-wmv',
+        
+        # صوت
+        'mp3': 'audio/mpeg',
+        'wav': 'audio/wav',
+        'ogg': 'audio/ogg',
+        
+        # مستندات
+        'pdf': 'application/pdf',
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls': 'application/vnd.ms-excel',
+        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        
+        # نصوص
+        'txt': 'text/plain',
+        'html': 'text/html',
+        'css': 'text/css',
+        'js': 'application/javascript',
+        
+        # أرشيف
+        'zip': 'application/zip',
+        'rar': 'application/x-rar-compressed',
+    }
+    
+    return content_types.get(ext, 'application/octet-stream')
+
+def get_file_url(project_id, file_name):
+    """الحصول على رابط التحميل من Supabase"""
+    file_path = f"{project_id}/{file_name}"
+    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_path}"
+
+def download_file_from_supabase(supabase, project_id, file_name):
+    """تحميل ملف من Supabase Storage"""
+    try:
+        file_path = f"{project_id}/{file_name}"
+        downloaded = supabase.storage.from_(BUCKET_NAME).download(file_path)
+        return downloaded
+    except Exception as e:
+        print(f"Error downloading file from Supabase: {e}")
+        return None
+
+def delete_project_files(supabase, project_id):
+    """حذف جميع ملفات المشروع من Supabase مع معالجة محسنة للأخطاء"""
+    try:
+        print(f"Attempting to delete files for project: {project_id}")
+        
+        # الحصول على قائمة جميع الملفات في مجلد المشروع
+        try:
+            file_list = supabase.storage.from_(BUCKET_NAME).list(project_id)
+            
+            if not file_list:
+                print(f"No files found for project {project_id}")
+                return True
+                
+            print(f"Found {len(file_list)} files to delete for project {project_id}")
+            
+            # إنشاء قائمة بمسارات الملفات للحذف
+            files_to_delete = []
+            for file_info in file_list:
+                if isinstance(file_info, dict) and 'name' in file_info:
+                    file_path = f"{project_id}/{file_info['name']}"
+                    files_to_delete.append(file_path)
+                elif hasattr(file_info, 'name'):
+                    file_path = f"{project_id}/{file_info.name}"
+                    files_to_delete.append(file_path)
+            
+            if files_to_delete:
+                # حذف جميع الملفات
+                delete_result = supabase.storage.from_(BUCKET_NAME).remove(files_to_delete)
+                print(f"Successfully deleted {len(files_to_delete)} files for project {project_id}")
+                return True
+            else:
+                print(f"No valid files found to delete for project {project_id}")
+                return True
+                
+        except Exception as list_error:
+            print(f"Error listing files for project {project_id}: {list_error}")
+            # في حالة فشل الحصول على القائمة، نحاول حذف المجلد كاملاً
+            try:
+                # محاولة حذف المجلد بأكمله (إذا كان فارغاً)
+                supabase.storage.from_(BUCKET_NAME).remove([f"{project_id}/"])
+                print(f"Attempted to remove project folder: {project_id}")
+                return True
+            except:
+                print(f"Could not remove project folder: {project_id}")
+                return False
+    
+    except Exception as e:
+        print(f"General error deleting project files for {project_id}: {e}")
+        return False
+
+def cleanup_expired_projects():
+    """حذف المشاريع المنتهية الصلاحية"""
+    while True:
+        try:
+            current_time = datetime.datetime.now()
+            expired_projects = []
+            
+            for project_id, project_data in list(projects_db.items()):
+                if current_time - project_data['created_at'] > timedelta(hours=24):
+                    expired_projects.append(project_id)
+            
+            for project_id in expired_projects:
+                supabase = get_supabase_client()
+                if supabase and project_id in projects_db:
+                    if delete_project_files(supabase, project_id):
+                        del projects_db[project_id]
+                        print(f"Deleted expired project: {project_id}")
+            
+            time.sleep(3600)  # التحقق كل ساعة
+        except Exception as e:
+            print(f"Error in cleanup_expired_projects: {e}")
+            time.sleep(300)  # الانتظار 5 دقائق عند حدوث خطأ
+
+# بدء عملية التنظيف في خيط منفصل
+cleanup_thread = threading.Thread(target=cleanup_expired_projects, daemon=True)
+cleanup_thread.start()
+
+# Routes
+@app.route('/')
+def index():
+    return HTML_TEMPLATE
+
+@app.route('/upload', methods=['POST'])
+def upload_project():
+    try:
+        # التحقق من اسم المشروع
+        project_name = request.form.get('projectName')
+        if not project_name or not project_name.strip():
+            print("Error: Project name is missing or empty")
+            return jsonify({'success': False, 'message': 'اسم المشروع مطلوب'})
+        
+        project_name = project_name.strip()
+        print(f"Processing project: {project_name}")
+        
+        # جمع الملفات المرفوعة
+        uploaded_files = []
+        total_size = 0
+        max_file_size = 50 * 1024 * 1024  # 50 MB حد أقصى لكل ملف
+        max_total_size = 200 * 1024 * 1024  # 200 MB حد أقصى للمشروع كاملاً
+        
+        for key in request.files:
+            file = request.files[key]
+            if file and file.filename and file.filename.strip():
+                # التحقق من حجم الملف
+                file.seek(0, 2)  # الانتقال إلى نهاية الملف
+                file_size = file.tell()
+                file.seek(0)  # العودة إلى البداية
+                
+                if file_size == 0:
+                    print(f"Warning: Empty file skipped - {file.filename}")
+                    continue
+                
+                if file_size > max_file_size:
+                    return jsonify({
+                        'success': False, 
+                        'message': f'الملف {file.filename} كبير جداً (الحد الأقصى 50 MB)'
+                    })
+                
+                total_size += file_size
+                uploaded_files.append({
+                    'file': file,
+                    'filename': file.filename.strip(),
+                    'size': file_size
+                })
+                
+                print(f"Added file: {file.filename} ({file_size} bytes)")
+        
+        if not uploaded_files:
+            print("Error: No valid files found")
+            return jsonify({'success': False, 'message': 'يجب اختيار ملف واحد على الأقل'})
+        
+        if total_size > max_total_size:
+            return jsonify({
+                'success': False, 
+                'message': f'حجم المشروع كبير جداً (الحد الأقصى 200 MB)'
+            })
+        
+        print(f"Total files: {len(uploaded_files)}, Total size: {total_size} bytes")
+        
+        # الحصول على عميل Supabase
+        supabase = get_supabase_client()
+        if not supabase:
+            print("Error: Failed to initialize Supabase client")
+            return jsonify({'success': False, 'message': 'خطأ في الاتصال بخدمة التخزين'})
+        
+        # إنشاء معرف فريد للمشروع
+        project_id = str(uuid.uuid4())
+        print(f"Created project ID: {project_id}")
+        
+        # رفع الملفات
+        file_urls = {}
+        failed_files = []
+        successful_uploads = 0
+        
+        for file_data in uploaded_files:
+            file = file_data['file']
+            filename = file_data['filename']
+            
+            try:
+                # قراءة محتوى الملف
+                file.seek(0)  # التأكد من أن المؤشر في البداية
+                file_content = file.read()
+                
+                if not file_content:
+                    failed_files.append(f"{filename} (محتوى فارغ)")
+                    print(f"Failed: {filename} - empty content")
+                    continue
+                
+                print(f"Uploading {filename} ({len(file_content)} bytes)...")
+                
+                # رفع الملف
+                success = upload_file_to_supabase(supabase, file_content, filename, project_id)
+                
+                if success:
+                    file_urls[filename] = get_file_url(project_id, filename)
+                    successful_uploads += 1
+                    print(f"Successfully uploaded: {filename}")
+                else:
+                    failed_files.append(filename)
+                    print(f"Failed to upload: {filename}")
+                    
+            except Exception as file_error:
+                print(f"Error processing file {filename}: {file_error}")
+                failed_files.append(f"{filename} (خطأ في المعالجة)")
+        
+        # التحقق من نجاح رفع بعض الملفات على الأقل
+        if not file_urls:
+            error_msg = "فشل في رفع جميع الملفات"
+            if failed_files:
+                error_msg += f". الملفات الفاشلة: {', '.join(failed_files)}"
+            
+            print(f"Upload completely failed: {error_msg}")
+            return jsonify({'success': False, 'message': error_msg})
+        
+        # حفظ بيانات المشروع
+        projects_db[project_id] = {
+            'name': project_name,
+            'file_urls': file_urls,
+            'created_at': datetime.datetime.now(),
+            'total_files': len(file_urls),
+            'total_size': total_size
+        }
+        
+        # تحضير الاستجابة
+        response_data = {
+            'success': True, 
+            'project_id': project_id,
+            'uploaded_files': successful_uploads,
+            'total_files': len(uploaded_files)
+        }
+        
+        # إضافة تحذير إذا فشل بعض الملفات
+        if failed_files:
+            response_data['warning'] = f"تم رفع {successful_uploads} من {len(uploaded_files)} ملف. فشل في: {', '.join(failed_files)}"
+            print(f"Partial success: {response_data['warning']}")
+        
+        print(f"Project {project_id} created successfully with {successful_uploads} files")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"Critical error in upload_project: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # تنظيف البيانات في حالة الخطأ
+        if 'project_id' in locals() and project_id in projects_db:
+            try:
+                # محاولة حذف الملفات المرفوعة جزئياً
+                supabase = get_supabase_client()
+                if supabase:
+                    delete_project_files(supabase, project_id)
+                del projects_db[project_id]
+            except:
+                pass
+        
+        return jsonify({
+            'success': False, 
+            'message': f'حدث خطأ غير متوقع أثناء رفع المشروع. يرجى المحاولة مرة أخرى.'
+        })
+
+@app.route('/api/project/<project_id>')
+def api_get_project(project_id):
+    if project_id not in projects_db:
+        return jsonify({'success': False, 'message': 'المشروع غير موجود'})
+    
+    project = projects_db[project_id]
+    return jsonify({
+        'success': True, 
+        'project': {
+            'name': project['name'],
+            'file_urls': project['file_urls'],
+            'created_at': project['created_at'].isoformat()
+        }
+    })
+
+@app.route('/project/<project_id>')
+def view_project(project_id):
+    if project_id not in projects_db:
+        return """
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                document.getElementById('deletedProject').style.display = 'block';
+                document.querySelector('.intro-section').style.display = 'none';
+                document.querySelector('.upload-section').style.display = 'none';
+            });
+        </script>
+        """ + HTML_TEMPLATE
+    
+    project = projects_db[project_id]
+    project_name = project['name']
+    created_at = project['created_at']
+    
+    # حساب الوقت المتبقي
+    time_remaining = (created_at + timedelta(hours=24)) - datetime.datetime.now()
+    if time_remaining.total_seconds() <= 0:
+        return """
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                document.getElementById('deletedProject').style.display = 'block';
+                document.querySelector('.intro-section').style.display = 'none';
+                document.querySelector('.upload-section').style.display = 'none';
+            });
+        </script>
+        """ + HTML_TEMPLATE
+    
+    hours, remainder = divmod(time_remaining.total_seconds(), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    countdown = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+    
+    # إنشاء قائمة الملفات
+    files_list = ""
+    for filename, file_url in project['file_urls'].items():
+        file_icon = get_file_icon_by_filename(filename)
+        
+        files_list += f"""
+        <div class="project-file-item">
+            <div class="project-file-info">
+                <i class="{file_icon} project-file-icon"></i>
+                <div class="project-file-details">
+                    <h5>{filename}</h5>
+                    <p>تم الرفع: {created_at.strftime('%Y-%m-%d %H:%M')}</p>
+                </div>
+            </div>
+            <a class="download-btn" href="{file_url}" download="{filename}">
+                <i class="fas fa-download"></i>
+                تحميل
+            </a>
+        </div>
+        """
+    
+    # تعديل HTML لعرض المشروع
+    modified_html = HTML_TEMPLATE.replace(
+        '<h3 id="projectTitle">مشروع تجريبي</h3>',
+        f'<h3 id="projectTitle">{project_name}</h3>'
+    ).replace(
+        '<span id="countdown">23:59:59</span>',
+        f'<span id="countdown">{countdown}</span>'
+    ).replace(
+        '<input type="text" id="projectLink" value="" readonly>',
+        f'<input type="text" id="projectLink" value="{request.url}" readonly>'
+    ).replace(
+        '<!-- سيتم إضافة الملفات هنا ديناميكياً -->',
+        files_list
+    )
+    
+    return modified_html
+
+def get_file_icon_by_filename(filename):
+    ext = filename.split('.').pop().lower()
+    
+    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
+        return 'fas fa-file-image'
+    elif ext in ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm']:
+        return 'fas fa-file-video'
+    elif ext in ['mp3', 'wav', 'ogg', 'flac', 'aac']:
+        return 'fas fa-file-audio'
+    elif ext == 'pdf':
+        return 'fas fa-file-pdf'
+    elif ext in ['doc', 'docx']:
+        return 'fas fa-file-word'
+    elif ext in ['xls', 'xlsx']:
+        return 'fas fa-file-excel'
+    elif ext in ['ppt', 'pptx']:
+        return 'fas fa-file-powerpoint'
+    elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
+        return 'fas fa-file-archive'
+    elif ext in ['txt', 'rtf', 'md']:
+        return 'fas fa-file-alt'
+    else:
+        return 'fas fa-file'
+
+@app.route('/download/<project_id>/<filename>')
+def download_file(project_id, filename):
+    if project_id not in projects_db:
+        return "المشروع غير موجود", 404
+    
+    project = projects_db[project_id]
+    if filename not in project['file_urls']:
+        return "الملف غير موجود", 404
+    
+    try:
+        supabase = get_supabase_client()
+        file_content = download_file_from_supabase(supabase, project_id, filename)
+        
+        if file_content:
+            return send_file(
+                BytesIO(file_content),
+                as_attachment=True,
+                download_name=filename
+            )
+        else:
+            # إذا فشل التحميل المباشر، إعادة التوجيه إلى رابط Supabase
+            return redirect(project['file_urls'][filename])
+    except Exception as e:
+        print(f"Error downloading file: {e}")
+        # إذا فشل التحميل، إعادة التوجيه إلى رابط Supabase
+        return redirect(project['file_urls'][filename])
+
+# إضافة route للتحقق من حالة Supabase
+@app.route('/api/supabase/status')
+def check_supabase_status():
+    """التحقق من حالة الاتصال مع Supabase"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            return jsonify({'status': 'error', 'message': 'فشل في الاتصال بـ Supabase'})
+        
+        # اختبار الوصول إلى Storage
+        buckets = supabase.storage.list_buckets()
+        bucket_exists = any(bucket.name == BUCKET_NAME for bucket in buckets)
+        
+        return jsonify({
+            'status': 'success',
+            'bucket_exists': bucket_exists,
+            'bucket_name': BUCKET_NAME,
+            'total_buckets': len(buckets)
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'خطأ في التحقق: {str(e)}'})
+
+# إضافة route للتشخيص
+@app.route('/api/debug/supabase')
+def debug_supabase():
+    """route للتشخيص ومعرفة حالة Supabase"""
+    try:
+        supabase = get_supabase_client()
+        
+        if not supabase:
+            return jsonify({
+                'status': 'error',
+                'message': 'فشل في تهيئة عميل Supabase',
+                'supabase_url': SUPABASE_URL[:50] + "..." if len(SUPABASE_URL) > 50 else SUPABASE_URL,
+                'has_key': bool(SUPABASE_KEY),
+                'bucket_name': BUCKET_NAME
+            })
+        
+        # اختبار العمليات الأساسية
+        buckets = supabase.storage.list_buckets()
+        bucket_names = [bucket.name for bucket in buckets]
+        bucket_exists = BUCKET_NAME in bucket_names
+        
+        # اختبار رفع ملف صغير للتأكد
+        test_success = False
+        try:
+            test_data = b"test file content"
+            test_path = "test/debug.txt"
+            
+            upload_result = supabase.storage.from_(BUCKET_NAME).upload(
+                test_path, 
+                test_data, 
+                {"content-type": "text/plain", "upsert": "true"}
+            )
+            
+            # حذف الملف التجريبي فوراً
+            supabase.storage.from_(BUCKET_NAME).remove([test_path])
+            test_success = True
+            
+        except Exception as test_error:
+            print(f"Test upload failed: {test_error}")
+        
+        return jsonify({
+            'status': 'success',
+            'bucket_exists': bucket_exists,
+            'bucket_name': BUCKET_NAME,
+            'total_buckets': len(buckets),
+            'bucket_names': bucket_names,
+            'upload_test': test_success,
+            'connection': 'working'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'خطأ في التشخيص: {str(e)}',
+            'connection': 'failed'
+        })
+
+@app.route('/ping')
+def ping():
+    return "pong", 200
+
+@app.errorhandler(404)
+def not_found(error):
+    return "الصفحة غير موجودة", 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return "حدث خطأ داخلي في الخادم", 500
+
+# HTML template (نفس محتوى index.html مع تعديلات JavaScript)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -1314,13 +1958,41 @@ HTML_TEMPLATE = """
 
         // إضافة الملفات إلى القائمة
         function addFilesToList(files) {
+            const maxFiles = 50; // حد أقصى لعدد الملفات
+            
+            if (selectedFiles.length + files.length > maxFiles) {
+                alert(`يمكن رفع ${maxFiles} ملف كحد أقصى`);
+                return;
+            }
+            
+            let addedCount = 0;
+            let skippedCount = 0;
+            
             files.forEach(file => {
-                if (!selectedFiles.find(f => f.name === file.name && f.size === file.size)) {
+                // التحقق من عدم وجود نفس الملف
+                const existingFile = selectedFiles.find(f => 
+                    f.name === file.name && 
+                    f.size === file.size && 
+                    f.lastModified === file.lastModified
+                );
+                
+                if (!existingFile) {
                     selectedFiles.push(file);
+                    addedCount++;
+                    console.log(`Added file: ${file.name} (${file.size} bytes, ${file.type})`);
+                } else {
+                    skippedCount++;
+                    console.log(`Skipped duplicate file: ${file.name}`);
                 }
             });
             
+            if (skippedCount > 0) {
+                alert(`تم تجاهل ${skippedCount} ملف مكرر`);
+            }
+            
             displayFilesList();
+            
+            console.log(`Files added: ${addedCount}, Total files: ${selectedFiles.length}`);
         }
 
         // عرض قائمة الملفات
@@ -1398,6 +2070,7 @@ HTML_TEMPLATE = """
         function submitProject() {
             const projectName = document.getElementById('projectName').value.trim();
             
+            // التحقق من صحة البيانات
             if (!projectName) {
                 alert('يرجى إدخال اسم المشروع');
                 return;
@@ -1408,41 +2081,94 @@ HTML_TEMPLATE = """
                 return;
             }
             
-            // محاكاة رفع الملفات
+            // التحقق من أحجام الملفات
+            const maxFileSize = 50 * 1024 * 1024; // 50 MB
+            const maxTotalSize = 200 * 1024 * 1024; // 200 MB
+            let totalSize = 0;
+            
+            for (let file of selectedFiles) {
+                if (file.size > maxFileSize) {
+                    alert(`الملف ${file.name} كبير جداً (الحد الأقصى 50 MB)`);
+                    return;
+                }
+                totalSize += file.size;
+            }
+            
+            if (totalSize > maxTotalSize) {
+                alert('حجم المشروع كبير جداً (الحد الأقصى 200 MB)');
+                return;
+            }
+            
+            console.log(`Submitting project: ${projectName}`);
+            console.log(`Files count: ${selectedFiles.length}`);
+            console.log(`Total size: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
+            
+            // بدء عملية الرفع
             showLoadingAnimation();
             
-            // إنشاء FormData وإرسال الملفات إلى الخادم
+            // إنشاء FormData وإضافة البيانات
             const formData = new FormData();
             formData.append('projectName', projectName);
             
+            // إضافة الملفات مع فهرسة صحيحة
             selectedFiles.forEach((file, index) => {
-                formData.append(`file${index}`, file);
+                console.log(`Adding file ${index}: ${file.name} (${file.size} bytes, ${file.type})`);
+                formData.append(`file_${index}`, file, file.name);
             });
             
-            fetch('/upload', {
+            // إعدادات الطلب
+            const requestOptions = {
                 method: 'POST',
-                body: formData
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.json();
-            })
-            .then(data => {
-                hideLoadingAnimation();
-                if (data.success) {
-                    // إعادة توجيه إلى صفحة المشروع
-                    window.location.href = `/project/${data.project_id}`;
-                } else {
-                    alert('حدث خطأ أثناء رفع المشروع: ' + data.message);
-                }
-            })
-            .catch(error => {
-                hideLoadingAnimation();
-                alert('حدث خطأ أثناء رفع المشروع. يرجى المحاولة مرة أخرى.');
-                console.error('Error:', error);
-            });
+                body: formData,
+                // عدم تعيين Content-Type header يدوياً - سيتم تعيينه تلقائياً مع boundary
+            };
+            
+            // إرسال الطلب
+            fetch('/upload', requestOptions)
+                .then(response => {
+                    console.log(`Response status: ${response.status}`);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    return response.json();
+                })
+                .then(data => {
+                    hideLoadingAnimation();
+                    console.log('Upload response:', data);
+                    
+                    if (data.success) {
+                        // عرض تحذير إذا كان هناك ملفات فشلت
+                        if (data.warning) {
+                            alert(`تم رفع المشروع مع تحذير: ${data.warning}`);
+                        }
+                        
+                        // إعادة توجيه إلى صفحة المشروع
+                        console.log(`Redirecting to project: ${data.project_id}`);
+                        window.location.href = `/project/${data.project_id}`;
+                    } else {
+                        alert(`فشل رفع المشروع: ${data.message || 'خطأ غير معروف'}`);
+                    }
+                })
+                .catch(error => {
+                    hideLoadingAnimation();
+                    console.error('Upload error:', error);
+                    
+                    let errorMessage = 'حدث خطأ أثناء رفع المشروع.';
+                    
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        errorMessage += ' تحقق من الاتصال بالإنترنت.';
+                    } else if (error.message.includes('413')) {
+                        errorMessage = 'الملفات كبيرة جداً. يرجى تقليل الحجم.';
+                    } else if (error.message.includes('500')) {
+                        errorMessage += ' خطأ في الخادم. حاول مرة أخرى.';
+                    } else {
+                        errorMessage += ` التفاصيل: ${error.message}`;
+                    }
+                    
+                    alert(errorMessage);
+                });
         }
 
         // عرض رسوم متحركة للتحميل
@@ -1451,6 +2177,14 @@ HTML_TEMPLATE = """
             if (submitBtn) {
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الرفع...';
                 submitBtn.disabled = true;
+                submitBtn.style.opacity = '0.7';
+            }
+            
+            // منع إغلاق النموذج أثناء الرفع
+            const cancelBtn = document.getElementById('cancelBtn');
+            if (cancelBtn) {
+                cancelBtn.disabled = true;
+                cancelBtn.style.opacity = '0.5';
             }
         }
 
@@ -1460,6 +2194,13 @@ HTML_TEMPLATE = """
             if (submitBtn) {
                 submitBtn.innerHTML = 'ارفع المشروع';
                 submitBtn.disabled = false;
+                submitBtn.style.opacity = '1';
+            }
+            
+            const cancelBtn = document.getElementById('cancelBtn');
+            if (cancelBtn) {
+                cancelBtn.disabled = false;
+                cancelBtn.style.opacity = '1';
             }
         }
 
@@ -1592,7 +2333,7 @@ HTML_TEMPLATE = """
         document.addEventListener('mousemove', function(e) {
             const floatingIcons = document.querySelectorAll('.floating-icon');
             
-            floatingIcons.forEach((icon, index) => {
+            floatingIcons.forEach((icon, index) {
                 const speed = (index + 1) * 0.0001;
                 const x = (e.clientX * speed);
                 const y = (e.clientY * speed);
@@ -1645,279 +2386,6 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
-
-# وظائف مساعدة لإدارة المشاريع والملفات مع Supabase
-def upload_file_to_supabase(supabase, file_data, file_name, project_id):
-    """رفع ملف إلى Supabase Storage"""
-    try:
-        # إنشاء مسار الملف باستخدام معرف المشروع
-        file_path = f"{project_id}/{file_name}"
-        
-        # رفع الملف إلى Supabase
-        res = supabase.storage.from_(BUCKET_NAME).upload(file_path, file_data, {"content-type": "application/octet-stream"})
-        return True
-    except Exception as e:
-        print(f"Error uploading file to Supabase: {e}")
-        return False
-
-def get_file_url(project_id, file_name):
-    """الحصول على رابط التحميل من Supabase"""
-    file_path = f"{project_id}/{file_name}"
-    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_path}"
-
-def download_file_from_supabase(supabase, project_id, file_name):
-    """تحميل ملف من Supabase Storage"""
-    try:
-        file_path = f"{project_id}/{file_name}"
-        downloaded = supabase.storage.from_(BUCKET_NAME).download(file_path)
-        return downloaded
-    except Exception as e:
-        print(f"Error downloading file from Supabase: {e}")
-        return None
-
-def delete_project_files(supabase, project_id):
-    """حذف جميع ملفات المشروع من Supabase"""
-    try:
-        # الحصول على قائمة جميع الملفات في مجلد المشروع
-        file_list = supabase.storage.from_(BUCKET_NAME).list(project_id)
-        
-        if file_list:
-            # إنشاء قائمة بمسارات الملفات للحذف
-            files_to_delete = [f"{project_id}/{file['name']}" for file in file_list]
-            
-            # حذف جميع الملفات
-            res = supabase.storage.from_(BUCKET_NAME).remove(files_to_delete)
-            return True
-    except Exception as e:
-        print(f"Error deleting project files from Supabase: {e}")
-    
-    return False
-
-def cleanup_expired_projects():
-    """حذف المشاريع المنتهية الصلاحية"""
-    while True:
-        try:
-            current_time = datetime.datetime.now()
-            expired_projects = []
-            
-            for project_id, project_data in list(projects_db.items()):
-                if current_time - project_data['created_at'] > timedelta(hours=24):
-                    expired_projects.append(project_id)
-            
-            for project_id in expired_projects:
-                supabase = get_supabase_client()
-                if supabase and project_id in projects_db:
-                    if delete_project_files(supabase, project_id):
-                        del projects_db[project_id]
-                        print(f"Deleted expired project: {project_id}")
-            
-            time.sleep(3600)  # التحقق كل ساعة
-        except Exception as e:
-            print(f"Error in cleanup_expired_projects: {e}")
-            time.sleep(300)  # الانتظار 5 دقائق عند حدوث خطأ
-
-# بدء عملية التنظيف في خيط منفصل
-cleanup_thread = threading.Thread(target=cleanup_expired_projects, daemon=True)
-cleanup_thread.start()
-
-# Routes
-@app.route('/')
-def index():
-    return HTML_TEMPLATE
-
-@app.route('/upload', methods=['POST'])
-def upload_project():
-    try:
-        project_name = request.form.get('projectName')
-        if not project_name:
-            return jsonify({'success': False, 'message': 'اسم المشروع مطلوب'})
-        
-        # الحصول على عميل Supabase
-        supabase = get_supabase_client()
-        if not supabase:
-            return jsonify({'success': False, 'message': 'خطأ في الاتصال بخدمة التخزين'})
-        
-        # إنشاء معرف فريد للمشروع
-        project_id = str(uuid.uuid4())
-        
-        # رفع الملفات
-        file_urls = {}
-        for key in request.files:
-            file = request.files[key]
-            if file.filename:
-                try:
-                    file_data = file.read()
-                    success = upload_file_to_supabase(supabase, file_data, file.filename, project_id)
-                    if success:
-                        file_urls[file.filename] = get_file_url(project_id, file.filename)
-                    else:
-                        return jsonify({'success': False, 'message': f'حدث خطأ أثناء رفع الملف {file.filename}'})
-                except Exception as e:
-                    print(f"Error uploading file {file.filename}: {e}")
-                    return jsonify({'success': False, 'message': f'حدث خطأ أثناء رفع الملف {file.filename}'})
-        
-        # حفظ بيانات المشروع
-        projects_db[project_id] = {
-            'name': project_name,
-            'file_urls': file_urls,
-            'created_at': datetime.datetime.now()
-        }
-        
-        return jsonify({'success': True, 'project_id': project_id})
-    
-    except Exception as e:
-        print(f"Error uploading project: {e}")
-        return jsonify({'success': False, 'message': 'حدث خطأ أثناء رفع المشروع'})
-
-@app.route('/api/project/<project_id>')
-def api_get_project(project_id):
-    if project_id not in projects_db:
-        return jsonify({'success': False, 'message': 'المشروع غير موجود'})
-    
-    project = projects_db[project_id]
-    return jsonify({
-        'success': True, 
-        'project': {
-            'name': project['name'],
-            'file_urls': project['file_urls'],
-            'created_at': project['created_at'].isoformat()
-        }
-    })
-
-@app.route('/project/<project_id>')
-def view_project(project_id):
-    if project_id not in projects_db:
-        return """
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                document.getElementById('deletedProject').style.display = 'block';
-                document.querySelector('.intro-section').style.display = 'none';
-                document.querySelector('.upload-section').style.display = 'none';
-            });
-        </script>
-        """ + HTML_TEMPLATE
-    
-    project = projects_db[project_id]
-    project_name = project['name']
-    created_at = project['created_at']
-    
-    # حساب الوقت المتبقي
-    time_remaining = (created_at + timedelta(hours=24)) - datetime.datetime.now()
-    if time_remaining.total_seconds() <= 0:
-        return """
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                document.getElementById('deletedProject').style.display = 'block';
-                document.querySelector('.intro-section').style.display = 'none';
-                document.querySelector('.upload-section').style.display = 'none';
-            });
-        </script>
-        """ + HTML_TEMPLATE
-    
-    hours, remainder = divmod(time_remaining.total_seconds(), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    countdown = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
-    
-    # إنشاء قائمة الملفات
-    files_list = ""
-    for filename, file_url in project['file_urls'].items():
-        file_icon = get_file_icon_by_filename(filename)
-        
-        files_list += f"""
-        <div class="project-file-item">
-            <div class="project-file-info">
-                <i class="{file_icon} project-file-icon"></i>
-                <div class="project-file-details">
-                    <h5>{filename}</h5>
-                    <p>تم الرفع: {created_at.strftime('%Y-%m-%d %H:%M')}</p>
-                </div>
-            </div>
-            <a class="download-btn" href="{file_url}" download="{filename}">
-                <i class="fas fa-download"></i>
-                تحميل
-            </a>
-        </div>
-        """
-    
-    # تعديل HTML لعرض المشروع
-    modified_html = HTML_TEMPLATE.replace(
-        '<h3 id="projectTitle">مشروع تجريبي</h3>',
-        f'<h3 id="projectTitle">{project_name}</h3>'
-    ).replace(
-        '<span id="countdown">23:59:59</span>',
-        f'<span id="countdown">{countdown}</span>'
-    ).replace(
-        '<input type="text" id="projectLink" value="" readonly>',
-        f'<input type="text" id="projectLink" value="{request.url}" readonly>'
-    ).replace(
-        '<!-- سيتم إضافة الملفات هنا ديناميكياً -->',
-        files_list
-    )
-    
-    return modified_html
-
-def get_file_icon_by_filename(filename):
-    ext = filename.split('.').pop().lower()
-    
-    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
-        return 'fas fa-file-image'
-    elif ext in ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm']:
-        return 'fas fa-file-video'
-    elif ext in ['mp3', 'wav', 'ogg', 'flac', 'aac']:
-        return 'fas fa-file-audio'
-    elif ext == 'pdf':
-        return 'fas fa-file-pdf'
-    elif ext in ['doc', 'docx']:
-        return 'fas fa-file-word'
-    elif ext in ['xls', 'xlsx']:
-        return 'fas fa-file-excel'
-    elif ext in ['ppt', 'pptx']:
-        return 'fas fa-file-powerpoint'
-    elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
-        return 'fas fa-file-archive'
-    elif ext in ['txt', 'rtf', 'md']:
-        return 'fas fa-file-alt'
-    else:
-        return 'fas fa-file'
-
-@app.route('/download/<project_id>/<filename>')
-def download_file(project_id, filename):
-    if project_id not in projects_db:
-        return "المشروع غير موجود", 404
-    
-    project = projects_db[project_id]
-    if filename not in project['file_urls']:
-        return "الملف غير موجود", 404
-    
-    try:
-        supabase = get_supabase_client()
-        file_content = download_file_from_supabase(supabase, project_id, filename)
-        
-        if file_content:
-            return send_file(
-                BytesIO(file_content),
-                as_attachment=True,
-                download_name=filename
-            )
-        else:
-            # إذا فشل التحميل المباشر، إعادة التوجيه إلى رابط Supabase
-            return redirect(project['file_urls'][filename])
-    except Exception as e:
-        print(f"Error downloading file: {e}")
-        # إذا فشل التحميل، إعادة التوجيه إلى رابط Supabase
-        return redirect(project['file_urls'][filename])
-
-@app.route('/ping')
-def ping():
-    return "pong", 200
-
-@app.errorhandler(404)
-def not_found(error):
-    return "الصفحة غير موجودة", 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return "حدث خطأ داخلي في الخادم", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
