@@ -16,19 +16,27 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "cloud24-secret-key-2025")
 
 # بيانات Supabase
-SUPABASE_URL = "https://gehboaskzdhotdyzzjae.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlaGJvYXNremRob3RkeXp6amFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYxNzMyMTYsImV4cCI6MjA3MTc0OTIxNn0.r0Z2f3xxnM9fv_oQDmOZV5rQCmaBm7OC885WQupmQ4o"
-BUCKET_NAME = "my-bucket"
+SUPABASE_URL = "https://jlozequlcpujhigyfqdi.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impsb3plcXVsY3B1amhpZ3lmcWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYyNDM2ODMsImV4cCI6MjA3MTgxOTY4M30.26WLWB6VEgKpLgIaClgImSgSa2OdRoJXGhHtaJ8q1nQ"
+BUCKET_NAME = "Cloud24"
 
-# قائمة الامتدادات المسموحة
-ALLOWED_EXTENSIONS = {
-    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',  # صور
-    'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv',  # فيديو
-    'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',  # صوت
-    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',  # مستندات
-    'txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml',  # نصوص
-    'zip', 'rar', '7z', 'tar', 'gz'  # أرشيف
-}
+# سياسات Supabase المطلوبة (يجب إنشاؤها في Dashboard)
+"""
+-- للقراءة
+CREATE POLICY "Allow public read access" ON storage.objects
+FOR SELECT USING (bucket_id = 'my-bucket');
+
+-- للكتابة
+CREATE POLICY "Allow public upload" ON storage.objects
+FOR INSERT WITH CHECK (bucket_id = 'my-bucket');
+
+-- للحذف
+CREATE POLICY "Allow public delete" ON storage.objects
+FOR DELETE USING (bucket_id = 'my-bucket');
+"""
+
+# إزالة قيود أنواع الملفات - السماح بجميع أنواع الملفات
+ALLOWED_EXTENSIONS = set()  # مجموعة فارغة للسماح بجميع الملفات
 
 # قاعدة بيانات مؤقتة (في بيئة حقيقية استخدم قاعدة بيانات حقيقية)
 projects_db = {}
@@ -60,9 +68,9 @@ def safe_filename(filename, project_id):
     return safe_name
 
 def allowed_file(filename):
-    """التحقق من أن امتداد الملف مسموح"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    """التحقق من أن امتداد الملف مسموح - السماح بجميع الملفات الآن"""
+    # السماح بجميع الملفات بدون قيود
+    return '.' in filename  # فقط التحقق من وجود امتداد
 
 # تهيئة Supabase Client
 @retry_on_failure(max_retries=3, delay=1)
@@ -373,9 +381,9 @@ def upload_project():
                 if file and file.filename and file.filename.strip():
                     filename = file.filename.strip()
                     
-                    # التحقق من الامتداد
+                    # التحقق من الامتداد (السماح بجميع الملفات الآن)
                     if not allowed_file(filename):
-                        print(f"Warning: Unsupported file extension - {filename}")
+                        print(f"Warning: File without extension - {filename}")
                         continue
                     
                     # التحقق من حجم الملف
@@ -772,6 +780,102 @@ def not_found(error):
 @app.errorhandler(500)
 def internal_error(error):
     return "حدث خطأ داخلي في الخادم", 500
+
+# إضافة route لاختبار شامل لاتصال Supabase
+@app.route('/test-supabase')
+def test_supabase_connection():
+    """اختبار شامل لاتصال Supabase"""
+    try:
+        # 1. اختبار إنشاء العميل
+        supabase = get_supabase_client()
+        if not supabase:
+            return jsonify({
+                'status': 'error',
+                'step': 'client_creation',
+                'message': 'فشل في إنشاء عميل Supabase'
+            })
+        
+        # 2. اختبار قائمة البكتس
+        try:
+            buckets = supabase.storage.list_buckets()
+            bucket_names = [bucket.name for bucket in buckets]
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'step': 'list_buckets',
+                'message': f'فشل في جلب قائمة البكتس: {str(e)}',
+                'suggestion': 'تحقق من صحة SUPABASE_URL و SUPABASE_KEY'
+            })
+        
+        # 3. التحقق من وجود البكت المطلوب
+        bucket_exists = BUCKET_NAME in bucket_names
+        if not bucket_exists:
+            return jsonify({
+                'status': 'warning',
+                'step': 'bucket_check',
+                'message': f'البكت {BUCKET_NAME} غير موجود',
+                'available_buckets': bucket_names,
+                'suggestion': f'أنشئ بكت باسم {BUCKET_NAME} أو غير BUCKET_NAME'
+            })
+        
+        # 4. اختبار رفع ملف تجريبي
+        try:
+            test_data = b"test file content for Cloud24"
+            test_path = "test/connection-test.txt"
+            
+            # رفع
+            upload_result = supabase.storage.from_(BUCKET_NAME).upload(
+                test_path, 
+                test_data, 
+                {"content-type": "text/plain", "upsert": "true"}
+            )
+            
+            # التحقق من الرفع
+            file_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{test_path}"
+            
+            # حذف الملف التجريبي
+            supabase.storage.from_(BUCKET_NAME).remove([test_path])
+            
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'step': 'upload_test',
+                'message': f'فشل في اختبار الرفع: {str(e)}',
+                'suggestion': 'تحقق من صلاحيات البكت (Storage Policies)'
+            })
+        
+        # 5. كل شيء يعمل بشكل صحيح
+        return jsonify({
+            'status': 'success',
+            'message': 'اتصال Supabase يعمل بشكل مثالي!',
+            'details': {
+                'supabase_url': SUPABASE_URL,
+                'bucket_name': BUCKET_NAME,
+                'total_buckets': len(buckets),
+                'bucket_names': bucket_names,
+                'upload_test': 'نجح',
+                'file_url_format': file_url
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'step': 'general',
+            'message': f'خطأ عام: {str(e)}',
+            'suggestion': 'تحقق من تثبيت مكتبة supabase: pip install supabase'
+        })
+
+# route إضافي لاختبار سريع
+@app.route('/config-check')
+def config_check():
+    """فحص سريع للإعدادات"""
+    return jsonify({
+        'supabase_url': SUPABASE_URL[:30] + "..." if len(SUPABASE_URL) > 30 else SUPABASE_URL,
+        'has_supabase_key': bool(SUPABASE_KEY and len(SUPABASE_KEY) > 10),
+        'bucket_name': BUCKET_NAME,
+        'key_length': len(SUPABASE_KEY) if SUPABASE_KEY else 0
+    })
 
 # HTML template (نفس محتوى index.html مع تعديلات JavaScript)
 HTML_TEMPLATE = """
@@ -1757,15 +1861,15 @@ HTML_TEMPLATE = """
                             <p>اضغط على "ارفع مشروع جديد"</p>
                         </div>
                         <div class="step">
-                            <span class="step-number">2</span>
+                            <span class="step_number">2</span>
                             <p>أدخل اسم المشروع واختر الملفات</p>
                         </div>
                         <div class="step">
-                            <span class="step-number">3</span>
+                            <span class="step_number">3</span>
                             <p>اضغط "ارفع المشروع" واحصل على الرابط</p>
                         </div>
                         <div class="step">
-                            <span class="step-number">4</span>
+                            <span class="step_number">4</span>
                             <p>شارك الرابط مع من تريد</p>
                         </div>
                     </div>
@@ -1795,7 +1899,7 @@ HTML_TEMPLATE = """
                         <div class="file-upload-area" id="fileUploadArea">
                             <i class="fas fa-cloud-upload-alt upload-icon"></i>
                             <p>اسحب الملفات هنا أو اضغط لاختيار الملفات</p>
-                            <input type="file" id="projectFiles" multiple accept="*/*" style="display: none;">
+                            <input type="file" id="projectFiles" multiple style="display: none;">
                         </div>
                     </div>
 
@@ -1859,7 +1963,7 @@ HTML_TEMPLATE = """
                         العودة للرئيسية
                     </button>
                 </div>
-    </section>
+            </section>
         </main>
 
         <!-- الفوتر -->
@@ -2071,16 +2175,6 @@ HTML_TEMPLATE = """
             addFilesToList(files);
         }
 
-        // قائمة الامتدادات المسموحة (متطابقة مع الباك-إند)
-        const allowedExtensions = [
-            'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',  // صور
-            'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv',  // فيديو
-            'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',  // صوت
-            'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',  // مستندات
-            'txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml',  // نصوص
-            'zip', 'rar', '7z', 'tar', 'gz'  // أرشيف
-        ];
-
         // إضافة الملفات إلى القائمة
         function addFilesToList(files) {
             const maxFiles = 50; // حد أقصى لعدد الملفات
@@ -2092,16 +2186,8 @@ HTML_TEMPLATE = """
             
             let addedCount = 0;
             let skippedCount = 0;
-            let unsupportedFiles = [];
             
             files.forEach(file => {
-                // التحقق من الامتداد
-                const fileExt = file.name.toLowerCase().split('.').pop();
-                if (!allowedExtensions.includes(fileExt)) {
-                    unsupportedFiles.push(file.name);
-                    return;
-                }
-                
                 // التحقق من عدم وجود نفس الملف
                 const existingFile = selectedFiles.find(f => 
                     f.name === file.name && 
@@ -2118,11 +2204,6 @@ HTML_TEMPLATE = """
                     console.log(`Skipped duplicate file: ${file.name}`);
                 }
             });
-            
-            // عرض التحذيرات
-            if (unsupportedFiles.length > 0) {
-                alert(`ملفات غير مدعومة تم تجاهلها: ${unsupportedFiles.join(', ')}`);
-            }
             
             if (skippedCount > 0) {
                 alert(`تم تجاهل ${skippedCount} ملف مكرر`);
@@ -2249,24 +2330,7 @@ HTML_TEMPLATE = """
             const maxTotalSize = 200 * 1024 * 1024; // 200 MB
             let totalSize = 0;
             
-            // قائمة الامتدادات المسموحة (متطابقة مع الباك-إند)
-            const allowedExtensions = [
-                'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',  // صور
-                'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv',  // فيديو
-                'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',  // صوت
-                'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',  // مستندات
-                'txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml',  // نصوص
-                'zip', 'rar', '7z', 'tar', 'gz'  // أرشيف
-            ];
-            
             for (let file of selectedFiles) {
-                // التحقق من الامتداد
-                const fileExt = file.name.toLowerCase().split('.').pop();
-                if (!allowedExtensions.includes(fileExt)) {
-                    alert(`نوع الملف غير مدعوم: ${file.name}`);
-                    return;
-                }
-                
                 if (file.size > maxFileSize) {
                     alert(`الملف ${file.name} كبير جداً (الحد الأقصى 50 MB)`);
                     return;
@@ -2589,7 +2653,7 @@ HTML_TEMPLATE = """
         function updateFloatingIcons() {
             const floatingIcons = document.querySelectorAll('.floating-icon');
             
-            floatingIcons.forEach((icon, index) => {
+            floatingIcons.forEach((icon, index) {
                 const speed = (index + 1) * 0.00008;
                 const x = (lastMouse.x - window.innerWidth/2) * speed;
                 const y = (lastMouse.y - window.innerHeight/2) * speed;
