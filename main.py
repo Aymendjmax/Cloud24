@@ -1,45 +1,30 @@
+# main.py
 import os
 import uuid
 import json
 import datetime
 from datetime import timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from io import BytesIO
 import threading
 import time
+from supabase import create_client, Client
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "cloud24-secret-key-2025")
 
-# بيانات Service Account المضمنة مباشرة في الكود
-SERVICE_ACCOUNT_INFO = {
-    "type": "service_account",
-    "project_id": "g-drive-470000",
-    "private_key_id": "cfb638c725283f4757860662c3d55eb49d6b89f2",
-    "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCoSJipGZv+Q0Rh\nV9hJNpg84n/vIgA0LR1cPfJQs0akmDUrQcUXLMm+uK7EHyiYIhRDJ0CSJQ5/3gEd\n1datMml/ud86O+3U65nXH2WTojiLKV4O2IpvsGoT0x/Cqi+8IfUftyyb4vr8HXIa\nMijE3YDh1zd8hKzRVyqpQ1zc4H9cpNSzw3Rj2cVlo3RNBoFzkkME86gkx8V/3WGm\nSVme9qTRKIWqYEhMKssVIso5S1Tk+hxOAliS1+TvQ0KuQINq47KNJLhYq+DJWfp7\nStG3SMwV0WGWmmNORHzW2eAicKntgN/UgBpoBHqnypWfvOocBAE4f4zWDjQJJqxF\n56BMNGntAgMBAAECggEAFdOeq1YlP7gRUy/d33cbjVASaF2IWbwdQgTN3E44ZCpS\nwRrNealHPHu/PTROY1cOOjyJ2TrBs++DRQ+igcHXYaflzmuN+C8bu8V4ewrQGyqh\nJrtKz1w6Efqw9KJ2wQfFf5jWShzJUXBvR3sIgyo4qHIt4fJiaN+NqrkQPxzGICmR\nkMgYU2KJIeF3cJEXWT9KPY4uui7abz/L8Y4giqz0xVImhAOJsiOwyo3vqQqAjy8b\nW+r9+aEFYDUW6u8WeNhZLtEAFQCzGaG1rIZX140ebZVf+WD/9munHEyxXo5wWdZS\nA/rJxdjsvsAslxBYWekAqdBDmNAwWV4+P4qJFXfeqQKBgQDtieQ+d7kKVaagko5q\nf2LaebIJuwOYTUiKoCxD/nFFnqCaaZm4vBbtWLklbK9iMPq7Rjl4Y7xzATplV45o\nVDOwjmR53yQanusvgoRo5CjUBd+rv8wTtB3tx5+nuFx2Ue9sGDSDGgbe2fg+uceV\nd4tPK38yy2eP79/21GHinmbX5QKBgQC1XMtl6f5lp2GvnCAi3rFVG7a0Shx11gxY\nT+PYO4B8rk5AEmqyx22X9o+wlzUPA8l0I4TnyOvQs0zqzNYJtpkO160s+CH73ngP\nQxKUKnjhv0hJZ1B+09+aUSqdY2vd4xcfS02X/kXuZNg1oIx1h6Gst9dEg2kZnNS6\nduHXfSaZaQKBgBebOYyft0r4ohuZFQAucrOFnpTq+ft7yrbEHkIPmlAx6IIP9o/u\nWVTzGUtH1tIqTfColPOK7eJ7/8KsheGGZLCqJgAalerzWioZjXEjI4+WmdjmsbBP\nmR3VVd+EKeQ0Vlfmu+k/f+lLvij1q4kGHVkb2INCxaL/UsGj76pm1Y+lAoGAQsAx\nmIQD/vQZLyI+bbca+6EkoLy6NuCeUI6u5HIZ+0nIQSrGHKDsBEdaYXt1qt4Q8m70\nRr8blAe6Ip1bld2f/eeBtJBrKaGa/LsKBoCPVz8o4uNkrBldLhX7okvqcpNXekwj\n9fI/WNvC/BHoQIW4CrLrRys6rpObdDm3K7HDWCkCgYEAolik2a11bQ+VXULfHPyx\n2NHoSOtoU0KgKUwJ1MGZ2yPEBF2R/Eqd5zZAbAgrHnWHjI32Z1bloTqWfqBWUKRW\nchMpsJ4frkD+gQHwHcATdd2FzmtGSt4HBz7DqGayquGw0hOoQ90enu4nolFVg8E1\n5okb1n3jULpjimG+KnRQIso=\n-----END PRIVATE KEY-----\n",
-    "client_email": "drive-storage-bot@g-drive-470000.iam.gserviceaccount.com",
-    "client_id": "107288918333111306081",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/drive-storage-bot%40g-drive-470000.iam.gserviceaccount.com",
-    "universe_domain": "googleapis.com"
-}
+# بيانات Supabase
+SUPABASE_URL = "https://gehboaskzdhotdyzzjae.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlaGJvYXNremRob3RkeXp6amFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYxNzMyMTYsImV4cCI6MjA3MTc0OTIxNn0.r0Z2f3xxnM9fv_oQDmOZV5rQCmaBm7OC885WQupmQ4o"
+BUCKET_NAME = "cloud24-storage"
 
-# تهيئة خدمة Google Drive
-def get_drive_service():
+# تهيئة Supabase Client
+def get_supabase_client():
     try:
-        credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        service = build('drive', 'v3', credentials=credentials)
-        return service
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        return supabase
     except Exception as e:
-        print(f"Error initializing Drive service: {e}")
+        print(f"Error initializing Supabase client: {e}")
         return None
 
 # قاعدة بيانات مؤقتة (في بيئة حقيقية استخدم قاعدة بيانات حقيقية)
@@ -1492,7 +1477,7 @@ HTML_TEMPLATE = """
         }, observerOptions);
 
         // مراقبة العناصر للرسوم المتحركة
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', () {
             const animatedElements = document.querySelectorAll('.feature-card, .step, .form-container, .project-container');
             
             animatedElements.forEach(el => {
@@ -1507,34 +1492,56 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# وظائف مساعدة لإدارة المشاريع والملفات
-def create_project_folder(service, project_name):
-    """إنشاء مجلد في Google Drive للمشروع"""
-    file_metadata = {
-        'name': project_name,
-        'mimeType': 'application/vnd.google-apps.folder'
-    }
-    folder = service.files().create(body=file_metadata, fields='id').execute()
-    return folder.get('id')
-
-def upload_file_to_drive(service, file_data, file_name, folder_id):
-    """رفع ملف إلى Google Drive داخل مجلد معين"""
-    file_metadata = {
-        'name': file_name,
-        'parents': [folder_id]
-    }
-    media = MediaIoBaseUpload(BytesIO(file_data), mimetype='application/octet-stream', resumable=True)
-    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    return file.get('id')
-
-def delete_folder(service, folder_id):
-    """حذف مجلد من Google Drive"""
+# وظائف مساعدة لإدارة المشاريع والملفات مع Supabase
+def upload_file_to_supabase(supabase, file_data, file_name, project_id):
+    """رفع ملف إلى Supabase Storage"""
     try:
-        service.files().delete(fileId=folder_id).execute()
+        # إنشاء مسار الملف باستخدام معرف المشروع
+        file_path = f"{project_id}/{file_name}"
+        
+        # رفع الملف إلى Supabase
+        res = supabase.storage.from_(BUCKET_NAME).upload(file_path, file_data)
         return True
     except Exception as e:
-        print(f"Error deleting folder: {e}")
+        print(f"Error uploading file to Supabase: {e}")
         return False
+
+def get_file_url(project_id, file_name):
+    """الحصول على رابط التحميل من Supabase"""
+    file_path = f"{project_id}/{file_name}"
+    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_path}"
+
+def download_file_from_supabase(supabase, project_id, file_name):
+    """تحميل ملف من Supabase Storage"""
+    try:
+        file_path = f"{project_id}/{file_name}"
+        downloaded = supabase.storage.from_(BUCKET_NAME).download(file_path)
+        return downloaded
+    except Exception as e:
+        print(f"Error downloading file from Supabase: {e}")
+        return None
+
+def delete_project_files(supabase, project_id):
+    """حذف جميع ملفات المشروع من Supabase"""
+    try:
+        # الحصول على قائمة جميع الملفات في مجلد المشروع
+        file_list = supabase.storage.from_(BUCKET_NAME).list(project_id)
+        
+        if file_list:
+            # إنشاء قائمة بمسارات الملفات للحذف
+            files_to_delete = [f"{project_id}/{file['name']}" for file in file_list]
+            
+            # حذف جميع الملفات
+            res = supabase.storage.from_(BUCKET_NAME).remove(files_to_delete)
+            return True
+    except Exception as e:
+        print(f"Error deleting project files from Supabase: {e}")
+    
+    return False
+
+# قاعدة بيانات مؤقتة (في بيئة حقيقية استخدم قاعدة بيانات حقيقية)
+projects_db = {}
+files_db = {}
 
 def cleanup_expired_projects():
     """حذف المشاريع المنتهية الصلاحية"""
@@ -1548,10 +1555,9 @@ def cleanup_expired_projects():
                     expired_projects.append(project_id)
             
             for project_id in expired_projects:
-                service = get_drive_service()
-                if service and project_id in projects_db:
-                    folder_id = projects_db[project_id]['folder_id']
-                    if delete_folder(service, folder_id):
+                supabase = get_supabase_client()
+                if supabase and project_id in projects_db:
+                    if delete_project_files(supabase, project_id):
                         del projects_db[project_id]
                         print(f"Deleted expired project: {project_id}")
             
@@ -1576,28 +1582,27 @@ def upload_project():
         if not project_name:
             return jsonify({'success': False, 'message': 'اسم المشروع مطلوب'})
         
-        # الحصول على خدمة Google Drive
-        service = get_drive_service()
-        if not service:
+        # الحصول على عميل Supabase
+        supabase = get_supabase_client()
+        if not supabase:
             return jsonify({'success': False, 'message': 'خطأ في الاتصال بخدمة التخزين'})
         
-        # إنشاء مجلد للمشروع
-        folder_id = create_project_folder(service, project_name)
+        # إنشاء معرف فريد للمشروع
+        project_id = str(uuid.uuid4())
         
         # رفع الملفات
         file_ids = {}
         for key in request.files:
             file = request.files[key]
             if file.filename:
-                file_id = upload_file_to_drive(service, file.read(), file.filename, folder_id)
-                file_ids[file.filename] = file_id
+                success = upload_file_to_supabase(supabase, file.read(), file.filename, project_id)
+                if success:
+                    file_ids[file.filename] = get_file_url(project_id, file.filename)
         
         # حفظ بيانات المشروع
-        project_id = str(uuid.uuid4())
         projects_db[project_id] = {
             'name': project_name,
-            'folder_id': folder_id,
-            'file_ids': file_ids,
+            'file_urls': file_ids,
             'created_at': datetime.datetime.now()
         }
         
@@ -1632,7 +1637,7 @@ def view_project(project_id):
     
     # إنشاء قائمة الملفات
     files_list = ""
-    for filename in project['file_ids']:
+    for filename, file_url in project['file_urls'].items():
         file_icon = "fas fa-file"
         if any(ext in filename.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif']):
             file_icon = "fas fa-file-image"
@@ -1688,21 +1693,21 @@ def download_file(project_id, filename):
         return "المشروع غير موجود", 404
     
     project = projects_db[project_id]
-    if filename not in project['file_ids']:
+    if filename not in project['file_urls']:
         return "الملف غير موجود", 404
     
     try:
-        service = get_drive_service()
-        file_id = project['file_ids'][filename]
+        supabase = get_supabase_client()
+        file_content = download_file_from_supabase(supabase, project_id, filename)
         
-        request_download = service.files().get_media(fileId=file_id)
-        file_content = request_download.execute()
-        
-        return send_file(
-            BytesIO(file_content),
-            as_attachment=True,
-            download_name=filename
-        )
+        if file_content:
+            return send_file(
+                BytesIO(file_content),
+                as_attachment=True,
+                download_name=filename
+            )
+        else:
+            return "حدث خطأ أثناء تحميل الملف", 500
     except Exception as e:
         print(f"Error downloading file: {e}")
         return "حدث خطأ أثناء تحميل الملف", 500
