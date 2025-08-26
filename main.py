@@ -456,7 +456,7 @@ def api_get_project(project_id):
         'project': {
             'name': project['name'],
             'file_urls': project['file_urls'],
-            'created_at': project['created_at'].isoformat()
+            'created_at': project['created_at'].isoformat() + 'Z'  # إضافة Z للإشارة إلى UTC
         }
     })
 
@@ -1774,10 +1774,12 @@ HTML_TEMPLATE = """
         // متغيرات عامة
         let selectedFiles = [];
         let countdownTimer;
+        let lastMouse = { x: 0, y: 0 };
 
         // عند تحميل الصفحة
         document.addEventListener('DOMContentLoaded', function() {
             initializeEventListeners();
+            updateFloatingIcons();
             
             // التحقق مما إذا كنا في صفحة مشروع
             const pathParts = window.location.pathname.split('/');
@@ -1816,6 +1818,7 @@ HTML_TEMPLATE = """
                 fileUploadArea.addEventListener('click', () => projectFiles.click());
                 fileUploadArea.addEventListener('dragover', handleDragOver);
                 fileUploadArea.addEventListener('drop', handleFileDrop);
+                fileUploadArea.addEventListener('dragleave', handleDragLeave);
                 projectFiles.addEventListener('change', handleFileSelect);
             }
 
@@ -1836,6 +1839,12 @@ HTML_TEMPLATE = """
             if (backToHomeBtn) {
                 backToHomeBtn.addEventListener('click', showHomePage);
             }
+
+            // تتبع حركة الماوس لتأثير الأيقونات العائمة
+            document.addEventListener('mousemove', function(e) {
+                lastMouse.x = e.clientX;
+                lastMouse.y = e.clientY;
+            });
         }
 
         // تحميل بيانات المشروع
@@ -1950,6 +1959,13 @@ HTML_TEMPLATE = """
             addFilesToList(files);
         }
 
+        // التعامل مع مغادرة منطقة السحب
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.style.background = '#f8f9fa';
+        }
+
         // التعامل مع اختيار الملفات
         function handleFileSelect(e) {
             const files = Array.from(e.target.files);
@@ -2008,43 +2024,68 @@ HTML_TEMPLATE = """
             });
         }
 
-        // إنشاء عنصر ملف
+        // إنشاء عنصر ملف (آمن من XSS باستخدام textContent)
         function createFileItem(file, index) {
             const fileItem = document.createElement('div');
             fileItem.className = 'file-item';
             
-            const fileIcon = getFileIcon(file.type);
-            const fileSize = formatFileSize(file.size);
+            const fileInfo = document.createElement('div');
+            fileInfo.className = 'file-info';
             
-            fileItem.innerHTML = `
-                <div class="file-info">
-                    <i class="${fileIcon} file-icon"></i>
-                    <div class="file-details">
-                        <h4>${file.name}</h4>
-                        <p>${fileSize} - ${file.type || 'نوع غير معروف'}</p>
-                    </div>
-                </div>
-                <button class="delete-file-btn" onclick="removeFile(${index})">
-                    <i class="fas fa-trash"></i>
-                </button>
-            `;
+            const fileIcon = document.createElement('i');
+            fileIcon.className = getFileIcon(file.type, file.name) + ' file-icon';
+            
+            const fileDetails = document.createElement('div');
+            fileDetails.className = 'file-details';
+            
+            const fileName = document.createElement('h4');
+            fileName.textContent = file.name; // آمن من XSS
+            
+            const fileMeta = document.createElement('p');
+            fileMeta.textContent = `${formatFileSize(file.size)} - ${file.type || 'نوع غير معروف'}`;
+            
+            fileDetails.appendChild(fileName);
+            fileDetails.appendChild(fileMeta);
+            fileInfo.appendChild(fileIcon);
+            fileInfo.appendChild(fileDetails);
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-file-btn';
+            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            deleteBtn.addEventListener('click', () => removeFile(index));
+            
+            fileItem.appendChild(fileInfo);
+            fileItem.appendChild(deleteBtn);
             
             return fileItem;
         }
 
-        // الحصول على أيقونة الملف
-        function getFileIcon(fileType) {
-            if (!fileType) return 'fas fa-file';
+        // الحصول على أيقونة الملف (مع fallback للامتداد)
+        function getFileIcon(fileType, fileName = '') {
+            if (fileType) {
+                if (fileType.startsWith('image/')) return 'fas fa-file-image';
+                if (fileType.startsWith('video/')) return 'fas fa-file-video';
+                if (fileType.startsWith('audio/')) return 'fas fa-file-audio';
+                if (fileType.includes('pdf')) return 'fas fa-file-pdf';
+                if (fileType.includes('word') || fileType.includes('document')) return 'fas fa-file-word';
+                if (fileType.includes('excel') || fileType.includes('spreadsheet')) return 'fas fa-file-excel';
+                if (fileType.includes('powerpoint') || fileType.includes('presentation')) return 'fas fa-file-powerpoint';
+                if (fileType.includes('zip') || fileType.includes('rar') || fileType.includes('compressed')) return 'fas fa-file-archive';
+                if (fileType.includes('text')) return 'fas fa-file-alt';
+            }
             
-            if (fileType.startsWith('image/')) return 'fas fa-file-image';
-            if (fileType.startsWith('video/')) return 'fas fa-file-video';
-            if (fileType.startsWith('audio/')) return 'fas fa-file-audio';
-            if (fileType.includes('pdf')) return 'fas fa-file-pdf';
-            if (fileType.includes('word') || fileType.includes('document')) return 'fas fa-file-word';
-            if (fileType.includes('excel') || fileType.includes('spreadsheet')) return 'fas fa-file-excel';
-            if (fileType.includes('powerpoint') || fileType.includes('presentation')) return 'fas fa-file-powerpoint';
-            if (fileType.includes('zip') || fileType.includes('rar') || fileType.includes('compressed')) return 'fas fa-file-archive';
-            if (fileType.includes('text')) return 'fas fa-file-alt';
+            // Fallback: استخدام امتداد الملف
+            const ext = fileName.split('.').pop().toLowerCase();
+            
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return 'fas fa-file-image';
+            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'].includes(ext)) return 'fas fa-file-video';
+            if (['mp3', 'wav', 'ogg', 'flac', 'aac'].includes(ext)) return 'fas fa-file-audio';
+            if (ext === 'pdf') return 'fas fa-file-pdf';
+            if (['doc', 'docx'].includes(ext)) return 'fas fa-file-word';
+            if (['xls', 'xlsx'].includes(ext)) return 'fas fa-file-excel';
+            if (['ppt', 'pptx'].includes(ext)) return 'fas fa-file-powerpoint';
+            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'fas fa-file-archive';
+            if (['txt', 'rtf', 'md'].includes(ext)) return 'fas fa-file-alt';
             
             return 'fas fa-file';
         }
@@ -2217,27 +2258,39 @@ HTML_TEMPLATE = """
             }
         }
 
-        // إنشاء عنصر ملف المشروع
+        // إنشاء عنصر ملف المشروع (آمن من XSS)
         function createProjectFileItem(filename, fileUrl, createdAt) {
             const fileItem = document.createElement('div');
             fileItem.className = 'project-file-item';
             
-            const fileIcon = getFileIconByFilename(filename);
-            const fileExt = filename.split('.').pop().toUpperCase();
+            const fileInfo = document.createElement('div');
+            fileInfo.className = 'project-file-info';
             
-            fileItem.innerHTML = `
-                <div class="project-file-info">
-                    <i class="${fileIcon} project-file-icon"></i>
-                    <div class="project-file-details">
-                        <h5>${filename}</h5>
-                        <p>تم الرفع: ${new Date(createdAt).toLocaleString('ar-SA')}</p>
-                    </div>
-                </div>
-                <a class="download-btn" href="${fileUrl}" download="${filename}">
-                    <i class="fas fa-download"></i>
-                    تحميل
-                </a>
-            `;
+            const fileIcon = document.createElement('i');
+            fileIcon.className = getFileIconByFilename(filename) + ' project-file-icon';
+            
+            const fileDetails = document.createElement('div');
+            fileDetails.className = 'project-file-details';
+            
+            const fileName = document.createElement('h5');
+            fileName.textContent = filename; // آمن من XSS
+            
+            const fileMeta = document.createElement('p');
+            fileMeta.textContent = `تم الرفع: ${parseCreatedAt(createdAt).toLocaleString('ar-SA')}`;
+            
+            fileDetails.appendChild(fileName);
+            fileDetails.appendChild(fileMeta);
+            fileInfo.appendChild(fileIcon);
+            fileInfo.appendChild(fileDetails);
+            
+            const downloadLink = document.createElement('a');
+            downloadLink.className = 'download-btn';
+            downloadLink.href = fileUrl;
+            downloadLink.download = filename;
+            downloadLink.innerHTML = '<i class="fas fa-download"></i> تحميل';
+            
+            fileItem.appendChild(fileInfo);
+            fileItem.appendChild(downloadLink);
             
             return fileItem;
         }
@@ -2259,9 +2312,24 @@ HTML_TEMPLATE = """
             return 'fas fa-file';
         }
 
+        // تحليل التاريخ من السيرفر (مع معالجة التوقيت العالمي)
+        function parseCreatedAt(createdAt) {
+            // إذا كان التاريخ يحتوي على Z (توقيت عالمي)
+            if (createdAt.includes('Z')) {
+                return new Date(createdAt);
+            }
+            
+            // إذا لم يكن هناك Z، نضيفها لفرض التوقيت العالمي
+            const d = new Date(createdAt + 'Z');
+            if (!isNaN(d)) return d;
+            
+            // إذا فشل ذلك، نعود إلى التاريخ الأصلي
+            return new Date(createdAt);
+        }
+
         // بدء العد التنازلي
         function startCountdown(createdAt) {
-            const createdTime = new Date(createdAt).getTime();
+            const createdTime = parseCreatedAt(createdAt).getTime();
             const expiryTime = createdTime + (24 * 60 * 60 * 1000); // 24 ساعة
             
             const countdownElement = document.getElementById('countdown');
@@ -2293,16 +2361,24 @@ HTML_TEMPLATE = """
             }, 1000);
         }
 
-        // نسخ رابط المشروع
-        function copyProjectLink() {
-            const projectLink = document.getElementById('projectLink');
-            if (projectLink) {
-                projectLink.select();
-                document.execCommand('copy');
+        // نسخ رابط المشروع باستخدام Clipboard API مع fallback
+        async function copyProjectLink() {
+            const projectLinkInput = document.getElementById('projectLink');
+            if (!projectLinkInput) return;
+            
+            const text = projectLinkInput.value;
+            const copyBtn = document.getElementById('copyBtn');
+            
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    // Fallback لبعض المتصفحات القديمة
+                    projectLinkInput.select();
+                    document.execCommand('copy');
+                }
                 
-                const copyBtn = document.getElementById('copyBtn');
                 const originalText = copyBtn.innerHTML;
-                
                 copyBtn.innerHTML = '<i class="fas fa-check"></i> تم النسخ';
                 copyBtn.style.background = '#28a745';
                 
@@ -2310,6 +2386,9 @@ HTML_TEMPLATE = """
                     copyBtn.innerHTML = originalText;
                     copyBtn.style.background = '#dc3545';
                 }, 2000);
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+                alert('فشل النسخ، الرجاء النسخ يدوياً.');
             }
         }
 
@@ -2329,18 +2408,20 @@ HTML_TEMPLATE = """
             }
         }
 
-        // تأثيرات إضافية للتفاعل
-        document.addEventListener('mousemove', function(e) {
+        // تأثيرات إضافية للتفاعل - تحسين أداء الأيقونات العائمة
+        function updateFloatingIcons() {
             const floatingIcons = document.querySelectorAll('.floating-icon');
             
-            floatingIcons.forEach((icon, index) {
-                const speed = (index + 1) * 0.0001;
-                const x = (e.clientX * speed);
-                const y = (e.clientY * speed);
+            floatingIcons.forEach((icon, index) => {
+                const speed = (index + 1) * 0.00008;
+                const x = (lastMouse.x - window.innerWidth/2) * speed;
+                const y = (lastMouse.y - window.innerHeight/2) * speed;
                 
-                icon.style.transform += ` translate(${x}px, ${y}px)`;
+                icon.style.transform = `translate(${x}px, ${y}px)`;
             });
-        });
+            
+            requestAnimationFrame(updateFloatingIcons);
+        }
 
         // تأثير التمرير السلس
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
