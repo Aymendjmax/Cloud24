@@ -440,29 +440,44 @@ HTML_TEMPLATE = """
             border-radius: 10px;
             margin-bottom: 10px;
             border-left: 4px solid #dc3545;
+            flex-wrap: wrap;
         }
 
         .file-info {
             display: flex;
             align-items: center;
             gap: 15px;
+            flex: 1;
+            min-width: 0;
         }
 
         .file-icon {
             font-size: 1.5rem;
             color: #dc3545;
+            flex-shrink: 0;
+        }
+
+        .file-details {
+            min-width: 0;
+            overflow: hidden;
         }
 
         .file-details h4 {
             margin: 0;
             color: #333;
             font-size: 1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .file-details p {
             margin: 0;
             color: #666;
             font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .delete-file-btn {
@@ -473,6 +488,7 @@ HTML_TEMPLATE = """
             border-radius: 5px;
             cursor: pointer;
             transition: background 0.3s ease;
+            flex-shrink: 0;
         }
 
         .delete-file-btn:hover {
@@ -647,6 +663,7 @@ HTML_TEMPLATE = """
             border-radius: 10px;
             border-left: 4px solid #dc3545;
             transition: transform 0.3s ease;
+            flex-wrap: wrap;
         }
 
         .project-file-item:hover {
@@ -657,23 +674,37 @@ HTML_TEMPLATE = """
             display: flex;
             align-items: center;
             gap: 15px;
+            flex: 1;
+            min-width: 0;
         }
 
         .project-file-icon {
             font-size: 2rem;
             color: #dc3545;
+            flex-shrink: 0;
+        }
+
+        .project-file-details {
+            min-width: 0;
+            overflow: hidden;
         }
 
         .project-file-details h5 {
             margin: 0;
             color: #333;
             font-size: 1.1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .project-file-details p {
             margin: 0;
             color: #666;
             font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .download-btn {
@@ -688,6 +719,7 @@ HTML_TEMPLATE = """
             align-items: center;
             gap: 8px;
             font-family: 'Cairo', sans-serif;
+            flex-shrink: 0;
         }
 
         .download-btn:hover {
@@ -760,7 +792,7 @@ HTML_TEMPLATE = """
         /* الفوتر */
         .footer {
             text-align: center;
-            padding: 40px 0;
+            padding: 30px 0;
             margin-top: 50px;
             border-top: 1px solid #e9ecef;
         }
@@ -769,6 +801,19 @@ HTML_TEMPLATE = """
             color: #666;
             font-size: 1rem;
             margin: 0;
+            line-height: 1.5;
+        }
+
+        .footer a {
+            color: #dc3545 !important;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+
+        .footer a:hover {
+            color: #c82333 !important;
+            text-decoration: underline;
         }
 
         /* الرسوم المتحركة */
@@ -829,6 +874,20 @@ HTML_TEMPLATE = """
             .cancel-btn, .submit-btn {
                 width: 100%;
             }
+
+            .file-item, .project-file-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .file-info, .project-file-info {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+
+            .delete-file-btn, .download-btn {
+                align-self: flex-end;
+            }
         }
 
         @media (max-width: 480px) {
@@ -861,6 +920,30 @@ HTML_TEMPLATE = """
             
             .timer-display span {
                 font-size: 1.8rem;
+            }
+
+            .file-upload-area {
+                padding: 20px;
+            }
+
+            .file-item, .project-file-item {
+                padding: 12px;
+            }
+
+            .file-icon, .project-file-icon {
+                font-size: 1.2rem;
+            }
+
+            .file-details h4, .project-file-details h5 {
+                font-size: 0.9rem;
+            }
+
+            .file-details p, .project-file-details p {
+                font-size: 0.8rem;
+            }
+
+            .footer p {
+                font-size: 0.85rem;
             }
         }
     </style>
@@ -1031,7 +1114,7 @@ HTML_TEMPLATE = """
 
         <!-- الفوتر -->
         <footer class="footer">
-            <p>جميع الحقوق محفوظة 2025 للمطور Aymen dj max</p>
+            <p>جميع الحقوق محفوظة 2025 للمطور <a href="https://adm-web.ct.ws" target="_blank">Aymen Dj Max</a></p>
         </footer>
     </div>
 
@@ -1113,7 +1196,10 @@ HTML_TEMPLATE = """
             
             // التركيز على حقل اسم المشروع
             setTimeout(() => {
-                document.getElementById('projectName').focus();
+                const projectNameInput = document.getElementById('projectName');
+                if (projectNameInput) {
+                    projectNameInput.focus();
+                }
             }, 100);
         }
 
@@ -1294,7 +1380,12 @@ HTML_TEMPLATE = """
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
             .then(data => {
                 hideLoadingAnimation();
                 if (data.success) {
@@ -1305,7 +1396,7 @@ HTML_TEMPLATE = """
             })
             .catch(error => {
                 hideLoadingAnimation();
-                alert('حدث خطأ أثناء رفع المشروع');
+                alert('حدث خطأ أثناء رفع المشروع. يرجى المحاولة مرة أخرى.');
                 console.error('Error:', error);
             });
         }
@@ -1377,6 +1468,10 @@ HTML_TEMPLATE = """
             let timeLeft = 24 * 60 * 60;
             
             const countdownElement = document.getElementById('countdown');
+            
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+            }
             
             countdownTimer = setInterval(() => {
                 const hours = Math.floor(timeLeft / 3600);
@@ -1477,7 +1572,7 @@ HTML_TEMPLATE = """
         }, observerOptions);
 
         // مراقبة العناصر للرسوم المتحركة
-        document.addEventListener('DOMContentLoaded', () {
+        document.addEventListener('DOMContentLoaded', function() {
             const animatedElements = document.querySelectorAll('.feature-card, .step, .form-container, .project-container');
             
             animatedElements.forEach(el => {
@@ -1539,10 +1634,6 @@ def delete_project_files(supabase, project_id):
     
     return False
 
-# قاعدة بيانات مؤقتة (في بيئة حقيقية استخدم قاعدة بيانات حقيقية)
-projects_db = {}
-files_db = {}
-
 def cleanup_expired_projects():
     """حذف المشاريع المنتهية الصلاحية"""
     while True:
@@ -1595,9 +1686,13 @@ def upload_project():
         for key in request.files:
             file = request.files[key]
             if file.filename:
-                success = upload_file_to_supabase(supabase, file.read(), file.filename, project_id)
-                if success:
-                    file_ids[file.filename] = get_file_url(project_id, file.filename)
+                try:
+                    success = upload_file_to_supabase(supabase, file.read(), file.filename, project_id)
+                    if success:
+                        file_ids[file.filename] = get_file_url(project_id, file.filename)
+                except Exception as e:
+                    print(f"Error uploading file {file.filename}: {e}")
+                    return jsonify({'success': False, 'message': f'حدث خطأ أثناء رفع الملف {file.filename}'})
         
         # حفظ بيانات المشروع
         projects_db[project_id] = {
@@ -1715,6 +1810,14 @@ def download_file(project_id, filename):
 @app.route('/ping')
 def ping():
     return "pong", 200
+
+@app.errorhandler(404)
+def not_found(error):
+    return "الصفحة غير موجودة", 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return "حدث خطأ داخلي في الخادم", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
