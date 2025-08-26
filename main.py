@@ -578,6 +578,13 @@ HTML_TEMPLATE = """
 
         .timer-display i {
             font-size: 2rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
         }
 
         .timer-display span {
@@ -720,6 +727,7 @@ HTML_TEMPLATE = """
             gap: 8px;
             font-family: 'Cairo', sans-serif;
             flex-shrink: 0;
+            text-decoration: none;
         }
 
         .download-btn:hover {
@@ -1126,7 +1134,14 @@ HTML_TEMPLATE = """
         // عند تحميل الصفحة
         document.addEventListener('DOMContentLoaded', function() {
             initializeEventListeners();
-            showHomePage();
+            
+            // التحقق مما إذا كنا في صفحة مشروع
+            const pathParts = window.location.pathname.split('/');
+            if (pathParts[1] === 'project' && pathParts[2]) {
+                loadProject(pathParts[2]);
+            } else {
+                showHomePage();
+            }
         });
 
         // تهيئة مستمعي الأحداث
@@ -1179,6 +1194,28 @@ HTML_TEMPLATE = """
             }
         }
 
+        // تحميل بيانات المشروع
+        function loadProject(projectId) {
+            fetch(`/api/project/${projectId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Project not found');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        showProjectView(data.project.name, projectId, data.project.file_urls, data.project.created_at);
+                    } else {
+                        showDeletedProject();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading project:', error);
+                    showDeletedProject();
+                });
+        }
+
         // عرض الصفحة الرئيسية
         function showHomePage() {
             hideAllSections();
@@ -1187,6 +1224,9 @@ HTML_TEMPLATE = """
             
             // إعادة تعيين النموذج
             resetForm();
+            
+            // تحديث عنوان الصفحة
+            window.history.pushState({}, '', '/');
         }
 
         // عرض نموذج المشروع
@@ -1204,18 +1244,21 @@ HTML_TEMPLATE = """
         }
 
         // عرض صفحة المشروع
-        function showProjectView(projectName, projectId) {
+        function showProjectView(projectName, projectId, fileUrls, createdAt) {
             hideAllSections();
             document.getElementById('projectView').style.display = 'block';
+            
+            // تحديث عنوان الصفحة
+            window.history.pushState({}, '', `/project/${projectId}`);
             
             // تحديث عنوان المشروع
             document.getElementById('projectTitle').textContent = projectName || 'مشروع جديد';
             
             // عرض الملفات
-            displayProjectFiles();
+            displayProjectFiles(fileUrls, createdAt);
             
             // بدء العد التنازلي
-            startCountdown();
+            startCountdown(createdAt);
             
             // إنشاء رابط المشروع
             const projectLink = `${window.location.origin}/project/${projectId}`;
@@ -1389,7 +1432,8 @@ HTML_TEMPLATE = """
             .then(data => {
                 hideLoadingAnimation();
                 if (data.success) {
-                    showProjectView(projectName, data.project_id);
+                    // إعادة توجيه إلى صفحة المشروع
+                    window.location.href = `/project/${data.project_id}`;
                 } else {
                     alert('حدث خطأ أثناء رفع المشروع: ' + data.message);
                 }
@@ -1420,52 +1464,64 @@ HTML_TEMPLATE = """
         }
 
         // عرض ملفات المشروع
-        function displayProjectFiles() {
+        function displayProjectFiles(fileUrls, createdAt) {
             const projectFilesList = document.getElementById('projectFilesList');
             if (!projectFilesList) return;
             
             projectFilesList.innerHTML = '';
             
-            selectedFiles.forEach(file => {
-                const fileItem = createProjectFileItem(file);
+            for (const [filename, fileUrl] of Object.entries(fileUrls)) {
+                const fileItem = createProjectFileItem(filename, fileUrl, createdAt);
                 projectFilesList.appendChild(fileItem);
-            });
+            }
         }
 
         // إنشاء عنصر ملف المشروع
-        function createProjectFileItem(file) {
+        function createProjectFileItem(filename, fileUrl, createdAt) {
             const fileItem = document.createElement('div');
             fileItem.className = 'project-file-item';
             
-            const fileIcon = getFileIcon(file.type);
-            const fileSize = formatFileSize(file.size);
+            const fileIcon = getFileIconByFilename(filename);
+            const fileExt = filename.split('.').pop().toUpperCase();
             
             fileItem.innerHTML = `
                 <div class="project-file-info">
                     <i class="${fileIcon} project-file-icon"></i>
                     <div class="project-file-details">
-                        <h5>${file.name}</h5>
-                        <p>${fileSize} - ${file.type || 'نوع غير معروف'}</p>
+                        <h5>${filename}</h5>
+                        <p>تم الرفع: ${new Date(createdAt).toLocaleString('ar-SA')}</p>
                     </div>
                 </div>
-                <button class="download-btn" onclick="downloadFile('${file.name}')">
+                <a class="download-btn" href="${fileUrl}" download="${filename}">
                     <i class="fas fa-download"></i>
                     تحميل
-                </button>
+                </a>
             `;
             
             return fileItem;
         }
 
-        // تحميل ملف (وهمي)
-        function downloadFile(fileName) {
-            alert(`سيتم تحميل الملف: ${fileName}`);
+        // الحصول على أيقونة الملف بناءً على اسم الملف
+        function getFileIconByFilename(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return 'fas fa-file-image';
+            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'].includes(ext)) return 'fas fa-file-video';
+            if (['mp3', 'wav', 'ogg', 'flac', 'aac'].includes(ext)) return 'fas fa-file-audio';
+            if (ext === 'pdf') return 'fas fa-file-pdf';
+            if (['doc', 'docx'].includes(ext)) return 'fas fa-file-word';
+            if (['xls', 'xlsx'].includes(ext)) return 'fas fa-file-excel';
+            if (['ppt', 'pptx'].includes(ext)) return 'fas fa-file-powerpoint';
+            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'fas fa-file-archive';
+            if (['txt', 'rtf', 'md'].includes(ext)) return 'fas fa-file-alt';
+            
+            return 'fas fa-file';
         }
 
         // بدء العد التنازلي
-        function startCountdown() {
-            // 24 ساعة بالثواني
-            let timeLeft = 24 * 60 * 60;
+        function startCountdown(createdAt) {
+            const createdTime = new Date(createdAt).getTime();
+            const expiryTime = createdTime + (24 * 60 * 60 * 1000); // 24 ساعة
             
             const countdownElement = document.getElementById('countdown');
             
@@ -1474,21 +1530,24 @@ HTML_TEMPLATE = """
             }
             
             countdownTimer = setInterval(() => {
-                const hours = Math.floor(timeLeft / 3600);
-                const minutes = Math.floor((timeLeft % 3600) / 60);
-                const seconds = timeLeft % 60;
+                const now = new Date().getTime();
+                const distance = expiryTime - now;
+                
+                if (distance < 0) {
+                    clearInterval(countdownTimer);
+                    countdownElement.textContent = "00:00:00";
+                    showDeletedProject();
+                    return;
+                }
+                
+                const hours = Math.floor(distance / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
                 
                 const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                 
                 if (countdownElement) {
                     countdownElement.textContent = timeString;
-                }
-                
-                timeLeft--;
-                
-                if (timeLeft < 0) {
-                    clearInterval(countdownTimer);
-                    showDeletedProject();
                 }
             }, 1000);
         }
@@ -1595,7 +1654,7 @@ def upload_file_to_supabase(supabase, file_data, file_name, project_id):
         file_path = f"{project_id}/{file_name}"
         
         # رفع الملف إلى Supabase
-        res = supabase.storage.from_(BUCKET_NAME).upload(file_path, file_data)
+        res = supabase.storage.from_(BUCKET_NAME).upload(file_path, file_data, {"content-type": "application/octet-stream"})
         return True
     except Exception as e:
         print(f"Error uploading file to Supabase: {e}")
@@ -1682,14 +1741,17 @@ def upload_project():
         project_id = str(uuid.uuid4())
         
         # رفع الملفات
-        file_ids = {}
+        file_urls = {}
         for key in request.files:
             file = request.files[key]
             if file.filename:
                 try:
-                    success = upload_file_to_supabase(supabase, file.read(), file.filename, project_id)
+                    file_data = file.read()
+                    success = upload_file_to_supabase(supabase, file_data, file.filename, project_id)
                     if success:
-                        file_ids[file.filename] = get_file_url(project_id, file.filename)
+                        file_urls[file.filename] = get_file_url(project_id, file.filename)
+                    else:
+                        return jsonify({'success': False, 'message': f'حدث خطأ أثناء رفع الملف {file.filename}'})
                 except Exception as e:
                     print(f"Error uploading file {file.filename}: {e}")
                     return jsonify({'success': False, 'message': f'حدث خطأ أثناء رفع الملف {file.filename}'})
@@ -1697,7 +1759,7 @@ def upload_project():
         # حفظ بيانات المشروع
         projects_db[project_id] = {
             'name': project_name,
-            'file_urls': file_ids,
+            'file_urls': file_urls,
             'created_at': datetime.datetime.now()
         }
         
@@ -1706,6 +1768,21 @@ def upload_project():
     except Exception as e:
         print(f"Error uploading project: {e}")
         return jsonify({'success': False, 'message': 'حدث خطأ أثناء رفع المشروع'})
+
+@app.route('/api/project/<project_id>')
+def api_get_project(project_id):
+    if project_id not in projects_db:
+        return jsonify({'success': False, 'message': 'المشروع غير موجود'})
+    
+    project = projects_db[project_id]
+    return jsonify({
+        'success': True, 
+        'project': {
+            'name': project['name'],
+            'file_urls': project['file_urls'],
+            'created_at': project['created_at'].isoformat()
+        }
+    })
 
 @app.route('/project/<project_id>')
 def view_project(project_id):
@@ -1726,6 +1803,17 @@ def view_project(project_id):
     
     # حساب الوقت المتبقي
     time_remaining = (created_at + timedelta(hours=24)) - datetime.datetime.now()
+    if time_remaining.total_seconds() <= 0:
+        return """
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                document.getElementById('deletedProject').style.display = 'block';
+                document.querySelector('.intro-section').style.display = 'none';
+                document.querySelector('.upload-section').style.display = 'none';
+            });
+        </script>
+        """ + HTML_TEMPLATE
+    
     hours, remainder = divmod(time_remaining.total_seconds(), 3600)
     minutes, seconds = divmod(remainder, 60)
     countdown = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
@@ -1733,21 +1821,7 @@ def view_project(project_id):
     # إنشاء قائمة الملفات
     files_list = ""
     for filename, file_url in project['file_urls'].items():
-        file_icon = "fas fa-file"
-        if any(ext in filename.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif']):
-            file_icon = "fas fa-file-image"
-        elif any(ext in filename.lower() for ext in ['.mp4', '.avi', '.mov']):
-            file_icon = "fas fa-file-video"
-        elif any(ext in filename.lower() for ext in ['.mp3', '.wav']):
-            file_icon = "fas fa-file-audio"
-        elif '.pdf' in filename.lower():
-            file_icon = "fas fa-file-pdf"
-        elif any(ext in filename.lower() for ext in ['.doc', '.docx']):
-            file_icon = "fas fa-file-word"
-        elif any(ext in filename.lower() for ext in ['.xls', '.xlsx']):
-            file_icon = "fas fa-file-excel"
-        elif any(ext in filename.lower() for ext in ['.zip', '.rar']):
-            file_icon = "fas fa-file-archive"
+        file_icon = get_file_icon_by_filename(filename)
         
         files_list += f"""
         <div class="project-file-item">
@@ -1758,7 +1832,7 @@ def view_project(project_id):
                     <p>تم الرفع: {created_at.strftime('%Y-%m-%d %H:%M')}</p>
                 </div>
             </div>
-            <a class="download-btn" href="/download/{project_id}/{filename}">
+            <a class="download-btn" href="{file_url}" download="{filename}">
                 <i class="fas fa-download"></i>
                 تحميل
             </a>
@@ -1782,6 +1856,30 @@ def view_project(project_id):
     
     return modified_html
 
+def get_file_icon_by_filename(filename):
+    ext = filename.split('.').pop().lower()
+    
+    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
+        return 'fas fa-file-image'
+    elif ext in ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm']:
+        return 'fas fa-file-video'
+    elif ext in ['mp3', 'wav', 'ogg', 'flac', 'aac']:
+        return 'fas fa-file-audio'
+    elif ext == 'pdf':
+        return 'fas fa-file-pdf'
+    elif ext in ['doc', 'docx']:
+        return 'fas fa-file-word'
+    elif ext in ['xls', 'xlsx']:
+        return 'fas fa-file-excel'
+    elif ext in ['ppt', 'pptx']:
+        return 'fas fa-file-powerpoint'
+    elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
+        return 'fas fa-file-archive'
+    elif ext in ['txt', 'rtf', 'md']:
+        return 'fas fa-file-alt'
+    else:
+        return 'fas fa-file'
+
 @app.route('/download/<project_id>/<filename>')
 def download_file(project_id, filename):
     if project_id not in projects_db:
@@ -1802,10 +1900,12 @@ def download_file(project_id, filename):
                 download_name=filename
             )
         else:
-            return "حدث خطأ أثناء تحميل الملف", 500
+            # إذا فشل التحميل المباشر، إعادة التوجيه إلى رابط Supabase
+            return redirect(project['file_urls'][filename])
     except Exception as e:
         print(f"Error downloading file: {e}")
-        return "حدث خطأ أثناء تحميل الملف", 500
+        # إذا فشل التحميل، إعادة التوجيه إلى رابط Supabase
+        return redirect(project['file_urls'][filename])
 
 @app.route('/ping')
 def ping():
