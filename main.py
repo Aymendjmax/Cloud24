@@ -10,30 +10,25 @@ from flask import Flask, request, jsonify, render_template, redirect, url_for, s
 from io import BytesIO
 import threading
 from functools import wraps
-from supabase import create_client, Client
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+import requests
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "cloud24-secret-key-2025")
 
-# بيانات Supabase
-SUPABASE_URL = "https://jlozequlcpujhigyfqdi.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impsb3plcXVsY3B1amhpZ3lmcWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYyNDM2ODMsImV4cCI6MjA3MTgxOTY4M30.26WLWB6VEgKpLgIaClgImSgSa2OdRoJXGhHtaJ8q1nQ"
-BUCKET_NAME = "A5-Cloud24"
+# إعدادات Cloudinary
+CLOUDINARY_CLOUD_NAME = "dnphkgppf"  # استبدل ببياناتك
+CLOUDINARY_API_KEY = "319752582295455"        # استبدل ببياناتك
+CLOUDINARY_API_SECRET = "h7cVYhOLeXMIrtiIsur6lVLU3gg"  # استبدل ببياناتك
 
-# سياسات Supabase المطلوبة (يجب إنشاؤها في Dashboard)
-"""
--- للقراءة
-CREATE POLICY "Allow public read access" ON storage.objects
-FOR SELECT USING (bucket_id = 'my-bucket');
-
--- للكتابة
-CREATE POLICY "Allow public upload" ON storage.objects
-FOR INSERT WITH CHECK (bucket_id = 'my-bucket');
-
--- للحذف
-CREATE POLICY "Allow public delete" ON storage.objects
-FOR DELETE USING (bucket_id = 'my-bucket');
-"""
+# تهيئة Cloudinary
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET
+)
 
 # إزالة قيود أنواع الملفات - السماح بجميع أنواع الملفات
 ALLOWED_EXTENSIONS = set()  # مجموعة فارغة للسماح بجميع الملفات
@@ -72,256 +67,68 @@ def allowed_file(filename):
     # السماح بجميع الملفات بدون قيود
     return '.' in filename  # فقط التحقق من وجود امتداد
 
-# تهيئة Supabase Client
 @retry_on_failure(max_retries=3, delay=1)
-def get_supabase_client():
-    """تحسين تهيئة عميل Supabase مع معالجة شاملة للأخطاء"""
+def upload_file_to_cloudinary(file_data, file_name, project_id):
+    """رفع ملف إلى Cloudinary مع معالجة محسنة للأخطاء"""
     try:
-        # التحقق من وجود المتغيرات المطلوبة
-        if not SUPABASE_URL:
-            print("Error: SUPABASE_URL is not defined or empty")
-            return None
-            
-        if not SUPABASE_KEY:
-            print("Error: SUPABASE_KEY is not defined or empty")
-            return None
-            
-        print(f"Initializing Supabase client for URL: {SUPABASE_URL}")
-        
-        # إنشاء العميل
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        
-        # اختبار الاتصال بشكل أساسي
-        try:
-            # محاولة الوصول إلى قائمة buckets للتأكد من صحة الاتصال
-            buckets_response = supabase.storage.list_buckets()
-            print(f"Successfully connected to Supabase. Found {len(buckets_response)} buckets.")
-            
-            # التحقق من وجود bucket المطلوب
-            bucket_exists = any(bucket.name == BUCKET_NAME for bucket in buckets_response)
-            
-            if not bucket_exists:
-                print(f"Warning: Bucket '{BUCKET_NAME}' does not exist. Attempting to create...")
-                try:
-                    # محاولة إنشاء bucket جديد
-                    create_result = supabase.storage.create_bucket(
-                        BUCKET_NAME, 
-                        {"public": True, "allowedMimeTypes": None, "fileSizeLimit": None}
-                    )
-                    print(f"Successfully created bucket: {BUCKET_NAME}")
-                except Exception as bucket_error:
-                    print(f"Failed to create bucket: {bucket_error}")
-                    # يمكن المتابعة حتى لو فشل إنشاء bucket، قد يكون موجود بالفعل
-            else:
-                print(f"Bucket '{BUCKET_NAME}' exists and is accessible")
-                
-            return supabase
-            
-        except Exception as connection_error:
-            print(f"Error testing Supabase connection: {connection_error}")
-            # تحقق إذا كان الخطأ متعلق بالصلاحيات أم بالاتصال
-            error_str = str(connection_error).lower()
-            if "unauthorized" in error_str or "forbidden" in error_str:
-                print("Error: Check your Supabase API key permissions")
-            elif "not found" in error_str:
-                print("Error: Check your Supabase URL")
-            return None
-            
-    except ImportError as import_error:
-        print(f"Error importing Supabase library: {import_error}")
-        print("Make sure to install supabase: pip install supabase")
-        return None
-    except Exception as e:
-        print(f"Unexpected error initializing Supabase client: {e}")
-        return None
-
-@retry_on_failure(max_retries=3, delay=1)
-def upload_file_to_supabase(supabase, file_data, file_name, project_id):
-    """رفع ملف إلى Supabase Storage مع معالجة محسنة للأخطاء"""
-    try:
-        # التحقق من وجود Bucket
-        try:
-            buckets = supabase.storage.list_buckets()
-            bucket_exists = any(bucket.name == BUCKET_NAME for bucket in buckets)
-            
-            if not bucket_exists:
-                # إنشاء Bucket إذا لم يكن موجوداً
-                try:
-                    supabase.storage.create_bucket(BUCKET_NAME, {"public": True})
-                    print(f"Created bucket: {BUCKET_NAME}")
-                except Exception as bucket_error:
-                    print(f"Error creating bucket: {bucket_error}")
-                    return False
-        except Exception as bucket_check_error:
-            print(f"Error checking buckets: {bucket_check_error}")
-            return False
-        
         # إنشاء مسار الملف
         file_path = f"{project_id}/{file_name}"
         
-        # تحديد نوع المحتوى بناءً على امتداد الملف
-        content_type = get_content_type(file_name)
+        # رفع الملف إلى Cloudinary
+        result = cloudinary.uploader.upload(
+            file_data,
+            public_id=file_path,
+            resource_type="auto"  # يكتشف نوع الملف تلقائياً
+        )
         
-        # رفع الملف
-        try:
-            res = supabase.storage.from_(BUCKET_NAME).upload(
-                file_path, 
-                file_data, 
-                {"content-type": content_type, "upsert": "true"}
-            )
+        if result and 'secure_url' in result:
+            print(f"Successfully uploaded to Cloudinary: {file_name}")
+            return result
+        else:
+            print(f"Failed to upload to Cloudinary: {file_name}")
+            return None
             
-            # التحقق من نجاح العملية
-            if hasattr(res, 'error') and res.error:
-                print(f"Supabase upload error: {res.error}")
-                return False
-                
-            print(f"Successfully uploaded: {file_name}")
-            return True
-            
-        except Exception as upload_error:
-            print(f"Error during file upload: {upload_error}")
-            # محاولة حذف الملف إذا كان موجوداً ثم إعادة الرفع
-            try:
-                supabase.storage.from_(BUCKET_NAME).remove([file_path])
-                res = supabase.storage.from_(BUCKET_NAME).upload(
-                    file_path, 
-                    file_data, 
-                    {"content-type": content_type}
-                )
-                print(f"Successfully uploaded on second attempt: {file_name}")
-                return True
-            except:
-                return False
-                
     except Exception as e:
-        print(f"Error uploading file to Supabase: {e}")
-        return False
-
-def get_content_type(filename):
-    """تحديد نوع المحتوى بناءً على امتداد الملف"""
-    ext = filename.lower().split('.')[-1]
-    
-    content_types = {
-        # صور
-        'jpg': 'image/jpeg',
-        'jpeg': 'image/jpeg',
-        'png': 'image/png',
-        'gif': 'image/gif',
-        'bmp': 'image/bmp',
-        'webp': 'image/webp',
-        'svg': 'image/svg+xml',
-        
-        # فيديو
-        'mp4': 'video/mp4',
-        'avi': 'video/x-msvideo',
-        'mov': 'video/quicktime',
-        'wmv': 'video/x-ms-wmv',
-        'flv': 'video/x-flv',
-        'webm': 'video/webm',
-        'mkv': 'video/x-matroska',
-        
-        # صوت
-        'mp3': 'audio/mpeg',
-        'wav': 'audio/wav',
-        'ogg': 'audio/ogg',
-        'flac': 'audio/flac',
-        'aac': 'audio/aac',
-        'm4a': 'audio/mp4',
-        
-        # مستندات
-        'pdf': 'application/pdf',
-        'doc': 'application/msword',
-        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'xls': 'application/vnd.ms-excel',
-        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'ppt': 'application/vnd.ms-powerpoint',
-        'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        
-        # نصوص
-        'txt': 'text/plain',
-        'rtf': 'application/rtf',
-        'md': 'text/markdown',
-        'html': 'text/html',
-        'css': 'text/css',
-        'js': 'application/javascript',
-        'json': 'application/json',
-        'xml': 'application/xml',
-        
-        # أرشيف
-        'zip': 'application/zip',
-        'rar': 'application/x-rar-compressed',
-        '7z': 'application/x-7z-compressed',
-        'tar': 'application/x-tar',
-        'gz': 'application/gzip',
-    }
-    
-    return content_types.get(ext, 'application/octet-stream')
+        print(f"Error uploading file to Cloudinary: {e}")
+        return None
 
 def get_file_url(project_id, file_name):
-    """الحصول على رابط التحميل من Supabase"""
+    """الحصول على رابط التحميل من Cloudinary"""
     file_path = f"{project_id}/{file_name}"
-    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_path}"
+    return cloudinary.CloudinaryImage(file_path).build_url()
 
 @retry_on_failure(max_retries=3, delay=1)
-def download_file_from_supabase(supabase, project_id, file_name):
-    """تحميل ملف من Supabase Storage"""
+def download_file_from_cloudinary(file_url):
+    """تحميل ملف من Cloudinary"""
     try:
-        file_path = f"{project_id}/{file_name}"
-        downloaded = supabase.storage.from_(BUCKET_NAME).download(file_path)
-        return downloaded
+        response = requests.get(file_url)
+        if response.status_code == 200:
+            return response.content
+        else:
+            print(f"Error downloading file from Cloudinary: {response.status_code}")
+            return None
     except Exception as e:
-        print(f"Error downloading file from Supabase: {e}")
+        print(f"Error downloading file from Cloudinary: {e}")
         return None
 
 @retry_on_failure(max_retries=3, delay=1)
-def delete_project_files(supabase, project_id):
-    """حذف جميع ملفات المشروع من Supabase مع معالجة محسنة للأخطاء"""
+def delete_project_files(project_id):
+    """حذف جميع ملفات المشروع من Cloudinary مع معالجة محسنة للأخطاء"""
     try:
         print(f"Attempting to delete files for project: {project_id}")
         
-        # الحصول على قائمة جميع الملفات في مجلد المشروع
-        try:
-            file_list = supabase.storage.from_(BUCKET_NAME).list(project_id)
+        # حذف جميع الموارد في مجلد المشروع
+        result = cloudinary.api.delete_resources_by_prefix(f"{project_id}/")
+        
+        if result and 'deleted' in result:
+            print(f"Successfully deleted {len(result['deleted'])} files for project {project_id}")
+            return True
+        else:
+            print(f"No files found to delete for project {project_id}")
+            return True
             
-            if not file_list:
-                print(f"No files found for project {project_id}")
-                return True
-                
-            print(f"Found {len(file_list)} files to delete for project {project_id}")
-            
-            # إنشاء قائمة بمسارات الملفات للحذف
-            files_to_delete = []
-            for file_info in file_list:
-                if isinstance(file_info, dict) and 'name' in file_info:
-                    file_path = f"{project_id}/{file_info['name']}"
-                    files_to_delete.append(file_path)
-                elif hasattr(file_info, 'name'):
-                    file_path = f"{project_id}/{file_info.name}"
-                    files_to_delete.append(file_path)
-            
-            if files_to_delete:
-                # حذف جميع الملفات
-                delete_result = supabase.storage.from_(BUCKET_NAME).remove(files_to_delete)
-                print(f"Successfully deleted {len(files_to_delete)} files for project {project_id}")
-                return True
-            else:
-                print(f"No valid files found to delete for project {project_id}")
-                return True
-                
-        except Exception as list_error:
-            print(f"Error listing files for project {project_id}: {list_error}")
-            # في حالة فشل الحصول على القائمة، نحاول حذف المجلد كاملاً
-            try:
-                # محاولة حذف المجلد بأكمله (إذا كان فارغاً)
-                supabase.storage.from_(BUCKET_NAME).remove([f"{project_id}/"])
-                print(f"Attempted to remove project folder: {project_id}")
-                return True
-            except:
-                print(f"Could not remove project folder: {project_id}")
-                return False
-    
     except Exception as e:
-        print(f"General error deleting project files for {project_id}: {e}")
+        print(f"Error deleting project files from Cloudinary: {e}")
         return False
 
 def cleanup_expired_projects():
@@ -336,9 +143,8 @@ def cleanup_expired_projects():
                     expired_projects.append(project_id)
             
             for project_id in expired_projects:
-                supabase = get_supabase_client()
-                if supabase and project_id in projects_db:
-                    if delete_project_files(supabase, project_id):
+                if project_id in projects_db:
+                    if delete_project_files(project_id):
                         del projects_db[project_id]
                         print(f"Deleted expired project: {project_id}")
             
@@ -422,12 +228,6 @@ def upload_project():
         
         print(f"Total files: {len(uploaded_files)}, Total size: {total_size} bytes")
         
-        # الحصول على عميل Supabase
-        supabase = get_supabase_client()
-        if not supabase:
-            print("Error: Failed to initialize Supabase client")
-            return jsonify({'success': False, 'message': 'خطأ في الاتصال بخدمة التخزين'})
-        
         # إنشاء معرف فريد للمشروع
         project_id = str(uuid.uuid4())
         print(f"Created project ID: {project_id}")
@@ -470,12 +270,12 @@ def upload_project():
                 
                 print(f"Uploading {filename} as {safe_name} ({len(file_content)} bytes)...")
                 
-                # رفع الملف
-                success = upload_file_to_supabase(supabase, file_content, safe_name, project_id)
+                # رفع الملف إلى Cloudinary
+                result = upload_file_to_cloudinary(file_content, safe_name, project_id)
                 
-                if success:
+                if result:
                     file_urls[filename] = {
-                        'url': get_file_url(project_id, safe_name),
+                        'url': result['secure_url'],
                         'safe_name': safe_name
                     }
                     successful_uploads += 1
@@ -531,9 +331,7 @@ def upload_project():
         if 'project_id' in locals() and project_id in projects_db:
             try:
                 # محاولة حذف الملفات المرفوعة جزئياً
-                supabase = get_supabase_client()
-                if supabase:
-                    delete_project_files(supabase, project_id)
+                delete_project_files(project_id)
                 del projects_db[project_id]
             except:
                 pass
@@ -671,9 +469,11 @@ def download_file(project_id, filename):
         return "الملف غير موجود", 404
     
     try:
-        supabase = get_supabase_client()
-        safe_name = project['file_urls'][filename]['safe_name']
-        file_content = download_file_from_supabase(supabase, project_id, safe_name)
+        # الحصول على رابط الملف من Cloudinary
+        file_url = project['file_urls'][filename]['url']
+        
+        # تحميل الملف
+        file_content = download_file_from_cloudinary(file_url)
         
         if file_content:
             return send_file(
@@ -682,92 +482,34 @@ def download_file(project_id, filename):
                 download_name=filename
             )
         else:
-            # إذا فشل التحميل المباشر، إعادة التوجيه إلى رابط Supabase
-            return redirect(project['file_urls'][filename]['url'])
+            # إذا فشل التحميل المباشر، إعادة التوجيه إلى رابط Cloudinary
+            return redirect(file_url)
     except Exception as e:
         print(f"Error downloading file: {e}")
-        # إذا فشل التحميل، إعادة التوجيه إلى رابط Supabase
+        # إذا فشل التحميل، إعادة التوجيه إلى رابط Cloudinary
         return redirect(project['file_urls'][filename]['url'])
 
-# إضافة route للتحقق من حالة Supabase
-@app.route('/api/supabase/status')
-def check_supabase_status():
-    """التحقق من حالة الاتصال مع Supabase"""
+# إضافة route للتحقق من حالة Cloudinary
+@app.route('/api/cloudinary/status')
+def check_cloudinary_status():
+    """التحقق من حالة الاتصال مع Cloudinary"""
     try:
-        supabase = get_supabase_client()
-        if not supabase:
-            return jsonify({'status': 'error', 'message': 'فشل في الاتصال بـ Supabase'})
+        # اختبار بسيط للاتصال مع Cloudinary
+        test_result = cloudinary.uploader.upload(
+            b"test file content",
+            public_id="test/connection_test",
+            resource_type="raw"
+        )
         
-        # اختبار الوصول إلى Storage
-        buckets = supabase.storage.list_buckets()
-        bucket_exists = any(bucket.name == BUCKET_NAME for bucket in buckets)
-        
-        return jsonify({
-            'status': 'success',
-            'bucket_exists': bucket_exists,
-            'bucket_name': BUCKET_NAME,
-            'total_buckets': len(buckets)
-        })
+        if test_result and 'secure_url' in test_result:
+            # حذف الملف الاختباري
+            cloudinary.uploader.destroy(test_result['public_id'])
+            return jsonify({'status': 'success', 'message': 'اتصال Cloudinary يعمل بشكل صحيح'})
+        else:
+            return jsonify({'status': 'error', 'message': 'فشل في الاتصال بـ Cloudinary'})
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'خطأ في التحقق: {str(e)}'})
-
-# إضافة route للتشخيص
-@app.route('/api/debug/supabase')
-def debug_supabase():
-    """route للتشخيص ومعرفة حالة Supabase"""
-    try:
-        supabase = get_supabase_client()
-        
-        if not supabase:
-            return jsonify({
-                'status': 'error',
-                'message': 'فشل في تهيئة عميل Supabase',
-                'supabase_url': SUPABASE_URL[:50] + "..." if len(SUPABASE_URL) > 50 else SUPABASE_URL,
-                'has_key': bool(SUPABASE_KEY),
-                'bucket_name': BUCKET_NAME
-            })
-        
-        # اختبار العمليات الأساسية
-        buckets = supabase.storage.list_buckets()
-        bucket_names = [bucket.name for bucket in buckets]
-        bucket_exists = BUCKET_NAME in bucket_names
-        
-        # اختبار رفع ملف صغير للتأكد
-        test_success = False
-        try:
-            test_data = b"test file content"
-            test_path = "test/debug.txt"
-            
-            upload_result = supabase.storage.from_(BUCKET_NAME).upload(
-                test_path, 
-                test_data, 
-                {"content-type": "text/plain", "upsert": "true"}
-            )
-            
-            # حذف الملف التجريبي فوراً
-            supabase.storage.from_(BUCKET_NAME).remove([test_path])
-            test_success = True
-            
-        except Exception as test_error:
-            print(f"Test upload failed: {test_error}")
-        
-        return jsonify({
-            'status': 'success',
-            'bucket_exists': bucket_exists,
-            'bucket_name': BUCKET_NAME,
-            'total_buckets': len(buckets),
-            'bucket_names': bucket_names,
-            'upload_test': test_success,
-            'connection': 'working'
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'خطأ في التشخيص: {str(e)}',
-            'connection': 'failed'
-        })
 
 @app.route('/ping')
 def ping():
@@ -781,89 +523,42 @@ def not_found(error):
 def internal_error(error):
     return "حدث خطأ داخلي في الخادم", 500
 
-# إضافة route لاختبار شامل لاتصال Supabase
-@app.route('/test-supabase')
-def test_supabase_connection():
-    """اختبار شامل لاتصال Supabase"""
+# إضافة route لاختبار شامل لاتصال Cloudinary
+@app.route('/test-cloudinary')
+def test_cloudinary_connection():
+    """اختبار شامل لاتصال Cloudinary"""
     try:
-        # 1. اختبار إنشاء العميل
-        supabase = get_supabase_client()
-        if not supabase:
+        # اختبار رفع ملف تجريبي
+        test_data = b"test file content for Cloud24"
+        
+        result = cloudinary.uploader.upload(
+            test_data,
+            public_id="test/connection_test",
+            resource_type="raw"
+        )
+        
+        if result and 'secure_url' in result:
+            # حذف الملف الاختباري
+            cloudinary.uploader.destroy(result['public_id'])
+            return jsonify({
+                'status': 'success',
+                'message': 'اتصال Cloudinary يعمل بشكل مثالي!',
+                'details': {
+                    'cloud_name': CLOUDINARY_CLOUD_NAME,
+                    'upload_test': 'نجح'
+                }
+            })
+        else:
             return jsonify({
                 'status': 'error',
-                'step': 'client_creation',
-                'message': 'فشل في إنشاء عميل Supabase'
+                'message': 'فشل في اختبار الرفع إلى Cloudinary'
             })
-        
-        # 2. اختبار قائمة البكتس
-        try:
-            buckets = supabase.storage.list_buckets()
-            bucket_names = [bucket.name for bucket in buckets]
-        except Exception as e:
-            return jsonify({
-                'status': 'error',
-                'step': 'list_buckets',
-                'message': f'فشل في جلب قائمة البكتس: {str(e)}',
-                'suggestion': 'تحقق من صحة SUPABASE_URL و SUPABASE_KEY'
-            })
-        
-        # 3. التحقق من وجود البكت المطلوب
-        bucket_exists = BUCKET_NAME in bucket_names
-        if not bucket_exists:
-            return jsonify({
-                'status': 'warning',
-                'step': 'bucket_check',
-                'message': f'البكت {BUCKET_NAME} غير موجود',
-                'available_buckets': bucket_names,
-                'suggestion': f'أنشئ بكت باسم {BUCKET_NAME} أو غير BUCKET_NAME'
-            })
-        
-        # 4. اختبار رفع ملف تجريبي
-        try:
-            test_data = b"test file content for Cloud24"
-            test_path = "test/connection-test.txt"
-            
-            # رفع
-            upload_result = supabase.storage.from_(BUCKET_NAME).upload(
-                test_path, 
-                test_data, 
-                {"content-type": "text/plain", "upsert": "true"}
-            )
-            
-            # التحقق من الرفع
-            file_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{test_path}"
-            
-            # حذف الملف التجريبي
-            supabase.storage.from_(BUCKET_NAME).remove([test_path])
-            
-        except Exception as e:
-            return jsonify({
-                'status': 'error',
-                'step': 'upload_test',
-                'message': f'فشل في اختبار الرفع: {str(e)}',
-                'suggestion': 'تحقق من صلاحيات البكت (Storage Policies)'
-            })
-        
-        # 5. كل شيء يعمل بشكل صحيح
-        return jsonify({
-            'status': 'success',
-            'message': 'اتصال Supabase يعمل بشكل مثالي!',
-            'details': {
-                'supabase_url': SUPABASE_URL,
-                'bucket_name': BUCKET_NAME,
-                'total_buckets': len(buckets),
-                'bucket_names': bucket_names,
-                'upload_test': 'نجح',
-                'file_url_format': file_url
-            }
-        })
         
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'step': 'general',
             'message': f'خطأ عام: {str(e)}',
-            'suggestion': 'تحقق من تثبيت مكتبة supabase: pip install supabase'
+            'suggestion': 'تحقق من تثبيت مكتبة cloudinary: pip install cloudinary'
         })
 
 # route إضافي لاختبار سريع
@@ -871,13 +566,12 @@ def test_supabase_connection():
 def config_check():
     """فحص سريع للإعدادات"""
     return jsonify({
-        'supabase_url': SUPABASE_URL[:30] + "..." if len(SUPABASE_URL) > 30 else SUPABASE_URL,
-        'has_supabase_key': bool(SUPABASE_KEY and len(SUPABASE_KEY) > 10),
-        'bucket_name': BUCKET_NAME,
-        'key_length': len(SUPABASE_KEY) if SUPABASE_KEY else 0
+        'cloudinary_cloud_name': CLOUDINARY_CLOUD_NAME,
+        'has_cloudinary_key': bool(CLOUDINARY_API_KEY and len(CLOUDINARY_API_KEY) > 10),
+        'has_cloudinary_secret': bool(CLOUDINARY_API_SECRET and len(CLOUDINARY_API_SECRET) > 10)
     })
 
-# HTML template (نفس محتوى index.html مع تعديلات JavaScript)
+# HTML template (نفس محتوى index.html)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -2199,10 +1893,9 @@ HTML_TEMPLATE = """
                     selectedFiles.push(file);
                     addedCount++;
                     console.log(`Added file: ${file.name} (${file.size} bytes, ${file.type})`);
-                } else {
+                } else:
                     skippedCount++;
                     console.log(`Skipped duplicate file: ${file.name}`);
-                }
             });
             
             if (skippedCount > 0) {
