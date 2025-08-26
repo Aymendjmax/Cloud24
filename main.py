@@ -16,7 +16,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "cloud24-secret-key-2025")
 # بيانات Supabase
 SUPABASE_URL = "https://gehboaskzdhotdyzzjae.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlaGJvYXNremRob3RkeXp6amFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYxNzMyMTYsImV4cCI6MjA3MTc0OTIxNn0.r0Z2f3xxnM9fv_oQDmOZV5rQCmaBm7OC885WQupmQ4o"
-BUCKET_NAME = "cloud24-storage"
+BUCKET_NAME = "my-bucket"
 
 # تهيئة Supabase Client
 def get_supabase_client():
