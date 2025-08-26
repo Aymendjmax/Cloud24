@@ -18,7 +18,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "cloud24-secret-key-2025")
 # بيانات Supabase
 SUPABASE_URL = "https://jlozequlcpujhigyfqdi.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impsb3plcXVsY3B1amhpZ3lmcWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYyNDM2ODMsImV4cCI6MjA3MTgxOTY4M30.26WLWB6VEgKpLgIaClgImSgSa2OdRoJXGhHtaJ8q1nQ"
-BUCKET_NAME = "Cloud24"
+BUCKET_NAME = "A5-Cloud24"
 
 # سياسات Supabase المطلوبة (يجب إنشاؤها في Dashboard)
 """
