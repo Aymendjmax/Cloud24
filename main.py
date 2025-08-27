@@ -1729,8 +1729,10 @@ HTML_TEMPLATE = """
             }
         });
 
-        // تهيئة مستمعي الأحداث
+        // تهيئة مستمعي الأحداث - النسخة المصححة
         function initializeEventListeners() {
+            console.log('Initializing event listeners...');
+            
             // زر رفع مشروع جديد
             const newProjectBtn = document.getElementById('newProjectBtn');
             if (newProjectBtn) {
