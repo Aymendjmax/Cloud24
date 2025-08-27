@@ -436,26 +436,68 @@ def view_project(project_id):
     return modified_html
 
 def get_file_icon_by_filename(filename):
-    ext = filename.split('.').pop().lower()
+    ext = filename.split('.').pop().lower() if '.' in filename else ''
     
-    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']:
+    # ملفات الصور
+    if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif']:
         return 'fas fa-file-image'
-    elif ext in ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv']:
+    # ملفات الفيديو
+    elif ext in ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv', 'm4v', '3gp', 'mpeg', 'mpg']:
         return 'fas fa-file-video'
-    elif ext in ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']:
+    # ملفات الصوت
+    elif ext in ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'mid', 'midi']:
         return 'fas fa-file-audio'
+    # ملفات PDF
     elif ext == 'pdf':
         return 'fas fa-file-pdf'
-    elif ext in ['doc', 'docx']:
+    # ملفات Word
+    elif ext in ['doc', 'docx', 'docm', 'dot', 'dotx']:
         return 'fas fa-file-word'
-    elif ext in ['xls', 'xlsx']:
+    # ملفات Excel
+    elif ext in ['xls', 'xlsx', 'xlsm', 'xlt', 'xltx', 'csv']:
         return 'fas fa-file-excel'
-    elif ext in ['ppt', 'pptx']:
+    # ملفات PowerPoint
+    elif ext in ['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx']:
         return 'fas fa-file-powerpoint'
-    elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
+    # ملفات الأرشيف
+    elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso']:
         return 'fas fa-file-archive'
-    elif ext in ['txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml']:
+    # ملفات النصوص
+    elif ext in ['txt', 'rtf', 'md', 'tex', 'log']:
         return 'fas fa-file-alt'
+    # ملفات البرمجة
+    elif ext in ['html', 'htm', 'css', 'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 
+                'php', 'rb', 'go', 'swift', 'kt', 'rs', 'sh', 'bat', 'ps1', 'vb', 'cs', 'sql', 'xml', 
+                'json', 'yaml', 'yml', 'ini', 'cfg', 'conf']:
+        return 'fas fa-file-code'
+    # ملفات التطبيقات والتنفيذية
+    elif ext in ['exe', 'msi', 'apk', 'app', 'deb', 'rpm', 'dmg', 'pkg']:
+        return 'fas fa-cog'
+    # ملفات الخطوط
+    elif ext in ['ttf', 'otf', 'woff', 'woff2', 'eot']:
+        return 'fas fa-font'
+    # ملفات التصميم
+    elif ext in ['psd', 'ai', 'eps', 'sketch', 'fig', 'xd']:
+        return 'fas fa-paint-brush'
+    # ملفات قواعد البيانات
+    elif ext in ['db', 'sqlite', 'mdb', 'accdb', 'dbf']:
+        return 'fas fa-database'
+    # ملفات النسخ الاحتياطي
+    elif ext in ['bak', 'tmp', 'temp', 'backup']:
+        return 'fas fa-history'
+    # ملفات التورنت
+    elif ext == 'torrent':
+        return 'fas fa-magnet'
+    # ملفات القرص الافتراضي
+    elif ext in ['vhd', 'vdi', 'vmware', 'ova', 'ovf']:
+        return 'fas fa-hdd'
+    # ملفات الإلكترونيات والطباعة ثلاثية الأبعاد
+    elif ext in ['stl', 'obj', 'gcode', 'svg', 'dxf']:
+        return 'fas fa-cube'
+    # ملفات التشفير والمفاتيح
+    elif ext in ['pem', 'key', 'crt', 'cer', 'pfx', 'p12']:
+        return 'fas fa-key'
+    # ملفات أخرى
     else:
         return 'fas fa-file'
 
@@ -1893,9 +1935,10 @@ HTML_TEMPLATE = """
                     selectedFiles.push(file);
                     addedCount++;
                     console.log(`Added file: ${file.name} (${file.size} bytes, ${file.type})`);
-                } else:
+                } else {
                     skippedCount++;
                     console.log(`Skipped duplicate file: ${file.name}`);
+                }
             });
             
             if (skippedCount > 0) {
@@ -1973,15 +2016,27 @@ HTML_TEMPLATE = """
             // Fallback: استخدام امتداد الملف
             const ext = fileName.split('.').pop().toLowerCase();
             
-            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) return 'fas fa-file-image';
-            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'].includes(ext)) return 'fas fa-file-video';
-            if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) return 'fas fa-file-audio';
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif'].includes(ext)) return 'fas fa-file-image';
+            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv', 'm4v', '3gp', 'mpeg', 'mpg'].includes(ext)) return 'fas fa-file-video';
+            if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'mid', 'midi'].includes(ext)) return 'fas fa-file-audio';
             if (ext === 'pdf') return 'fas fa-file-pdf';
-            if (['doc', 'docx'].includes(ext)) return 'fas fa-file-word';
-            if (['xls', 'xlsx'].includes(ext)) return 'fas fa-file-excel';
-            if (['ppt', 'pptx'].includes(ext)) return 'fas fa-file-powerpoint';
-            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'fas fa-file-archive';
-            if (['txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml'].includes(ext)) return 'fas fa-file-alt';
+            if (['doc', 'docx', 'docm', 'dot', 'dotx'].includes(ext)) return 'fas fa-file-word';
+            if (['xls', 'xlsx', 'xlsm', 'xlt', 'xltx', 'csv'].includes(ext)) return 'fas fa-file-excel';
+            if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx'].includes(ext)) return 'fas fa-file-powerpoint';
+            if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso'].includes(ext)) return 'fas fa-file-archive';
+            if (['txt', 'rtf', 'md', 'tex', 'log'].includes(ext)) return 'fas fa-file-alt';
+            if (['html', 'htm', 'css', 'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 
+                'php', 'rb', 'go', 'swift', 'kt', 'rs', 'sh', 'bat', 'ps1', 'vb', 'cs', 'sql', 'xml', 
+                'json', 'yaml', 'yml', 'ini', 'cfg', 'conf'].includes(ext)) return 'fas fa-file-code';
+            if (['exe', 'msi', 'apk', 'app', 'deb', 'rpm', 'dmg', 'pkg'].includes(ext)) return 'fas fa-cog';
+            if (['ttf', 'otf', 'woff', 'woff2', 'eot'].includes(ext)) return 'fas fa-font';
+            if (['psd', 'ai', 'eps', 'sketch', 'fig', 'xd'].includes(ext)) return 'fas fa-paint-brush';
+            if (['db', 'sqlite', 'mdb', 'accdb', 'dbf'].includes(ext)) return 'fas fa-database';
+            if (['bak', 'tmp', 'temp', 'backup'].includes(ext)) return 'fas fa-history';
+            if (ext === 'torrent') return 'fas fa-magnet';
+            if (['vhd', 'vdi', 'vmware', 'ova', 'ovf'].includes(ext)) return 'fas fa-hdd';
+            if (['stl', 'obj', 'gcode', 'svg', 'dxf'].includes(ext)) return 'fas fa-cube';
+            if (['pem', 'key', 'crt', 'cer', 'pfx', 'p12'].includes(ext)) return 'fas fa-key';
             
             return 'fas fa-file';
         }
@@ -2227,15 +2282,27 @@ HTML_TEMPLATE = """
         function getFileIconByFilename(filename) {
             const ext = filename.split('.').pop().toLowerCase();
             
-            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) return 'fas fa-file-image';
-            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'].includes(ext)) return 'fas fa-file-video';
-            if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) return 'fas fa-file-audio';
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif'].includes(ext)) return 'fas fa-file-image';
+            if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv', 'm4v', '3gp', 'mpeg', 'mpg'].includes(ext)) return 'fas fa-file-video';
+            if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'mid', 'midi'].includes(ext)) return 'fas fa-file-audio';
             if (ext === 'pdf') return 'fas fa-file-pdf';
-            if (['doc', 'docx'].includes(ext)) return 'fas fa-file-word';
-            if (['xls', 'xlsx'].includes(ext)) return 'fas fa-file-excel';
-            if (['ppt', 'pptx'].includes(ext)) return 'fas fa-file-powerpoint';
-            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'fas fa-file-archive';
-            if (['txt', 'rtf', 'md', 'html', 'css', 'js', 'json', 'xml'].includes(ext)) return 'fas fa-file-alt';
+            if (['doc', 'docx', 'docm', 'dot', 'dotx'].includes(ext)) return 'fas fa-file-word';
+            if (['xls', 'xlsx', 'xlsm', 'xlt', 'xltx', 'csv'].includes(ext)) return 'fas fa-file-excel';
+            if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx'].includes(ext)) return 'fas fa-file-powerpoint';
+            if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso'].includes(ext)) return 'fas fa-file-archive';
+            if (['txt', 'rtf', 'md', 'tex', 'log'].includes(ext)) return 'fas fa-file-alt';
+            if (['html', 'htm', 'css', 'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 
+                'php', 'rb', 'go', 'swift', 'kt', 'rs', 'sh', 'bat', 'ps1', 'vb', 'cs', 'sql', 'xml', 
+                'json', 'yaml', 'yml', 'ini', 'cfg', 'conf'].includes(ext)) return 'fas fa-file-code';
+            if (['exe', 'msi', 'apk', 'app', 'deb', 'rpm', 'dmg', 'pkg'].includes(ext)) return 'fas fa-cog';
+            if (['ttf', 'otf', 'woff', 'woff2', 'eot'].includes(ext)) return 'fas fa-font';
+            if (['psd', 'ai', 'eps', 'sketch', 'fig', 'xd'].includes(ext)) return 'fas fa-paint-brush';
+            if (['db', 'sqlite', 'mdb', 'accdb', 'dbf'].includes(ext)) return 'fas fa-database';
+            if (['bak', 'tmp', 'temp', 'backup'].includes(ext)) return 'fas fa-history';
+            if (ext === 'torrent') return 'fas fa-magnet';
+            if (['vhd', 'vdi', 'vmware', 'ova', 'ovf'].includes(ext)) return 'fas fa-hdd';
+            if (['stl', 'obj', 'gcode', 'svg', 'dxf'].includes(ext)) return 'fas fa-cube';
+            if (['pem', 'key', 'crt', 'cer', 'pfx', 'p12'].includes(ext)) return 'fas fa-key';
             
             return 'fas fa-file';
         }
