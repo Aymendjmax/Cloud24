@@ -750,6 +750,7 @@ HTML_TEMPLATE = """
             flex-direction: column;
             align-items: center;
             gap: 20px;
+            margin-bottom: 20px;
         }
 
         .logo {
@@ -1156,6 +1157,7 @@ HTML_TEMPLATE = """
             justify-content: center;
             gap: 15px;
             margin-bottom: 10px;
+            flex-wrap: wrap;
         }
 
         .timer-display i {
@@ -1614,7 +1616,7 @@ HTML_TEMPLATE = """
 
             <!-- زر رفع مشروع جديد -->
             <section class="upload-section">
-                <button class="upload-btn" id="newProjectBtn">
+                <button type="button" class="upload-btn" id="newProjectBtn" onclick="showProjectForm()">
                     <i class="fas fa-cloud-upload-alt"></i>
                     ارفع مشروع جديد
                 </button>
@@ -1733,12 +1735,6 @@ HTML_TEMPLATE = """
         function initializeEventListeners() {
             console.log('Initializing event listeners...');
             
-            // زر رفع مشروع جديد
-            const newProjectBtn = document.getElementById('newProjectBtn');
-            if (newProjectBtn) {
-                newProjectBtn.addEventListener('click', showProjectForm);
-            }
-
             // زر الإلغاء
             const cancelBtn = document.getElementById('cancelBtn');
             if (cancelBtn) {
@@ -2048,7 +2044,7 @@ HTML_TEMPLATE = """
             if (bytes === 0) return '0 بايت';
             
             const k = 1024;
-            const sizes = ['بايت', 'كيلوبايت', 'ميجابايت', 'جيجابايت'];
+            const sizes = ['بايت', 'كيلوباיט', 'ميجابايت', 'جيجابايت'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
