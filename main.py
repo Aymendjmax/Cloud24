@@ -1550,7 +1550,7 @@ HTML_TEMPLATE = """
         <!-- الهيدر -->
         <header class="header">
             <div class="logo-container">
-                <img src="https://i.postimg.cc/9Fv1kXBp/A-logo-for-a-website-that-expresses-its-name-Cloud24-The-logo-must-be-re-20250824-045026.jpg" alt="Cloud24 Logo" class="logo">
+                <img src="https://i.postimg.cc/Yq0yQM7n/Cloud24-red.png" alt="Cloud24 Logo" class="logo">
                 <h1 class="site-title">Cloud24</h1>
             </div>
         </header>
